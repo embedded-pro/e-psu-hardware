@@ -64,7 +64,7 @@ It uses an STM32G474 and is built and assembled at JLCPCB/LCSC.
 
 USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
 
-## Simulation results (ngspice, `sim/`, REPORT.md)
+## Simulation results (ngspice, `simulation/`, REPORT.md)
 
 - **As drawn, the loops are unstable:**
   - CV loop phase margin is as low as −92° (unstable in 52 of 150 cases).
