@@ -1,7 +1,10 @@
 name: pcb-quality
 
-# Layout-quality gate: KiCad DRC (zones refilled, schematic parity) plus the
-# geometry checks DRC cannot do: off-grid track angles, jogs, acute corners,
+# Layout-quality gate: shorts and clearance (copper-safety checks forced to
+# error, exclusions ignored, plus a fab-minimum floor), KiCad DRC (zones
+# refilled, schematic parity) and the
+# geometry checks DRC cannot do: off-grid angles, 90-degree corners, mid-track
+# branches, jogs,
 # segments/vias per connection and detours. Script and fab profiles come from
 # the pcb-design-rules skill in gabrielfrasantos/claude-hardware-skills, pinned
 # to a commit. The report is posted to the job summary and uploaded.
@@ -29,7 +32,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: gabrielfrasantos/claude-hardware-skills
-          ref: 348892f2907631f1e010cf8a6710151584c06fb5
+          ref: d4dbd7d93573e5c4666e852d46d9d65272cfb078
           path: .hw-skills
 
       - name: Install KiCad CLI
