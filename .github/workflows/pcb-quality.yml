@@ -1,13 +1,13 @@
 name: pcb-quality
 
-# Layout-quality gate: shorts and clearance (copper-safety checks forced to
-# error, exclusions ignored, plus a fab-minimum floor), KiCad DRC (zones
-# refilled, schematic parity) and the
-# geometry checks DRC cannot do: off-grid angles, 90-degree corners, mid-track
-# branches, jogs,
-# segments/vias per connection and detours. Script and fab profiles come from
-# the pcb-design-rules skill in gabrielfrasantos/claude-hardware-skills, pinned
-# to a commit. The report is posted to the job summary and uploaded.
+# Layout-quality gate, run by pcb_rules.py from the pcb-design-rules skill
+# (gabrielfrasantos/claude-hardware-skills, pinned to a commit):
+# - shorts and clearance: copper-safety checks forced to error, their DRC
+#   exclusions ignored, plus a pass against the fab's absolute minimums;
+# - KiCad DRC with zones refilled and schematic parity;
+# - geometry DRC cannot check: off-grid angles, 90-degree corners, mid-track
+#   branches, jogs, segments/vias per connection, detours.
+# The report goes to the job summary and an artifact.
 
 on:
   pull_request:
