@@ -369,6 +369,6 @@ Verify every rating against the live datasheet or app note. The numbers here are
 - **IPC-2152:** conductor current-carrying capacity.
 - **IPC-2221:** generic PCB design, conductor spacing (Table 6-1), current capacity.
 - **MOSFETs in linear mode:** vendor app notes on the Spirito effect and DC SOA, from Infineon, Nexperia and IXYS (linear MOSFETs).
-- **Loop-gain measurement:** R. Tian et al., "Striking a balance between accuracy and ease of use" (Tian method); Middlebrook's double-injection technique.
+- **Loop-gain measurement:** M. Tian, V. Visvanathan, J. Hantgan, K. Kundert, "Striving for Small-Signal Stability", IEEE Circuits and Devices Magazine 17(1), 2001 (Tian method); R. D. Middlebrook, "Measurement of Loop Gain in Feedback Systems", Int. J. Electronics 38(4), 1975 (double injection).
 - **Layout:** the pre-regulator's datasheet layout section, and the current-sense amplifier's Kelvin layout guidance.
 - **JLCPCB capabilities** (jlcpcb.com/capabilities): check the current numbers; they change over time.
