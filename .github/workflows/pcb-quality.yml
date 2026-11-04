@@ -1,0 +1,59 @@
+name: pcb-quality
+
+# Layout-quality gate: KiCad DRC (zones refilled, schematic parity) plus the
+# geometry checks DRC cannot do: off-grid track angles, jogs, acute corners,
+# segments/vias per connection and detours. Script and fab profiles come from
+# the pcb-design-rules skill in gabrielfrasantos/claude-hardware-skills, pinned
+# to a commit. The report is posted to the job summary and uploaded.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: PCB quality (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [e-psu]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Checkout pcb-design-rules skill
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: gabrielfrasantos/claude-hardware-skills
+          ref: 348892f2907631f1e010cf8a6710151584c06fb5
+          path: .hw-skills
+
+      - name: Install KiCad CLI
+        # Same KiCad 10 PPA as kicad-bot and kicad-diff.
+        run: |
+          set -euo pipefail
+          sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends kicad-cli || sudo apt-get install -y --no-install-recommends kicad
+
+      - name: Check layout
+        run: |
+          python3 .hw-skills/plugins/hardware-design/skills/pcb-design-rules/scripts/pcb_rules.py check \
+            "hardware/${{ matrix.board }}/${{ matrix.board }}.kicad_pcb" \
+            --report pcb-quality.md --json pcb-quality.json
+
+      - name: Job summary
+        if: always()
+        run: test -f pcb-quality.md && cat pcb-quality.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pcb-quality-${{ matrix.board }}
+          path: pcb-quality.*
+          if-no-files-found: ignore

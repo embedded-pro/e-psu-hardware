@@ -134,5 +134,6 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
 - `.github/workflows/`:
   - kicad-bot ERC/DRC on every push and PR;
   - visual diff on PRs;
+  - layout-quality gate on PRs (`pcb_rules.py check` from the pcb-design-rules skill, pinned by commit);
   - release-please releases with a fabrication bundle.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, …), which drive the version and the CHANGELOG.
