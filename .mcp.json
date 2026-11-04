@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "kicad": {
+      "type": "stdio",
+      "command": "C:\\Users\\Gabriel\\AppData\\Local\\Programs\\Python\\Python314\\Scripts\\kicad-mcp-pro.exe",
+      "args": [
+        "--transport",
+        "stdio",
+        "--project-dir",
+        "hardware",
+        "--profile",
+        "schematic_only"
+      ]
+    }
+  }
+}

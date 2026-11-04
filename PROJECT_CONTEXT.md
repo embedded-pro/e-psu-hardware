@@ -87,7 +87,7 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
   - The analog CC loop can't limit below about 30 mA.
   - Down-programming with no load is slow.
 
-## PCB (rev A, `pcb/`, `kicad/e-psu.kicad_pcb`, `fab/`)
+## PCB (rev A, `hardware/e-psu/e-psu.kicad_pcb`, `scripts/pcb/`)
 
 - **Board:** 100 × 100 mm, 4 layers: F signals and pours / In1 GND plane / In2 power planes / B signals and pours. JLCPCB standard process; specify 1 oz inner copper.
 - **Placement:** follows the 3D mockup.
@@ -105,23 +105,34 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
   - Plane fan-out, including QFN ground pins tied to the exposed pad.
   - Own grid router with rip-up, driven by KiCad DRC. Freerouting 2.1 left about 60 connections open on this board.
   - Escape rings around fine-pitch ICs.
-  - Rebuild: `cd pcb && python3 make_board.py --own`, then `--tidy` if DRC shows anything.
+  - Rebuild: `cd scripts/pcb && python3 make_board.py --own`, then `--tidy` if DRC shows anything.
 - **Status:** fully routed. 244 parts, 887 vias. KiCad DRC: 0 errors, 0 unconnected, 39 silkscreen warnings.
-- **Fab:** `fab/` holds Gerbers (zip), BOM, CPL and renders. JLC 4-layer, 1.6 mm, 1 oz inner.
+- **Fab:** `scripts/export_jlcpcb.py` writes Gerbers, BOM and CPL to `manufacturing/e-psu/` (gitignored). Every GitHub Release attaches a bundle. JLC 4-layer, 1.6 mm, 1 oz inner.
 - **Gotcha:** saving a board from Python makes KiCad overwrite the .kicad_pro net-class patterns, so call `copper.write_project()` after every save and run DRC in a fresh process.
 
 ## Still to check or do
 
 - Pinouts against the makers' drawings: HF115F onto the RT1 footprint (8 pins, which matches), B0505S, and VOM1271 (pin 4 = +).
-- Run ERC in KiCad.
+- Get KiCad ERC clean. kicad-bot (KiCad 10) runs ERC and DRC in CI and gates releases on them.
 - **U201 footprint is provisional.** Import TI RNP0030B and re-route the buck corner before ordering.
 - LCSC part numbers for the passives: 69 of 100 BOM lines are missing. Only ICs and special parts have them.
 - Check the JLCPCB CPL rotations in their preview.
 
-## Files
+## Repository (same shape as embedded-pro/e-foc-hardware)
 
-- `kicad/`: schematic project and PDF.
-- `sim/`: ngspice suite that reads component values from `kicad/`.
-- `gen/`: Python schematic generator. It is one-way and overwrites the KiCad files.
-- `pcb/`: board build scripts (`make_board.py`), router, copper plan (`power.py`).
-- `fab/`: Gerbers, drill, BOM, CPL and renders for JLCPCB.
+- `hardware/e-psu/`: KiCad 7 project (schematic, PCB, project symbols and footprints).
+- `scripts/`: e-foc-style export helpers:
+  - `export_review.py`;
+  - `export_jlcpcb.py`;
+  - `export_release.py`;
+  - `visual_diff.py`.
+- `scripts/pcb/`: board build scripts (`make_board.py`), router, copper plan (`power.py`), renders.
+- `scripts/schgen/`: Python schematic generator. It is one-way and overwrites `hardware/e-psu/`.
+- `simulation/`: ngspice suite that reads component values from `hardware/e-psu/`.
+- `docs/`: the PSU design and review guide (`psu-hardware-design-guide.md`) and the board renders.
+- `.claude/agents/psu-board-reviewer.md`: design-review agent.
+- `.github/workflows/`:
+  - kicad-bot ERC/DRC on every push and PR;
+  - visual diff on PRs;
+  - release-please releases with a fabrication bundle.
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, …), which drive the version and the CHANGELOG.

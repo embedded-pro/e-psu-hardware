@@ -1,16 +1,70 @@
-# KiCad
-*.kicad_prl
+# ---- KiCad ----
+# Backups & auto-saves
+*.bak
+*-bak
+*.kicad_pcb-bak
+*.kicad_sch-bak
+_autosave-*
+*-save.kicad_pcb
+*-save.kicad_sch
 *-backups/
 fp-info-cache
 *.lck
-\#auto_saved_files#
+*~
+.history/
 
-# generated / bulky
-sim/work/
-pcb/work/
-pcb/work_*.log
-tools/
+# Per-user project-local settings (display state, not design intent)
+*.kicad_prl
 
-# Python
+# Generated / fabrication outputs
+*.net
+*.rpt
+*.drl
+*.gbr
+*.gbrjob
+*.pos
+*.d356
+# ngspice raw output
+*.raw
+gerbers/
+fab/
+jlcpcb/
+production/
+manufacturing/
+# per-board release bundles (export_release.py)
+release/
+# local visual-diff output (visual_diff.py)
+diff/
+# local kicad-cli review package (schematic PDF, BOM, ERC/DRC, gerbers, pcb_views)
+review_exports/
+
+# NOTE: keep these TRACKED (do not ignore):
+#   *.kicad_pro, *.kicad_pcb, *.kicad_sch, *.kicad_sym, *.pretty/,
+#   sym-lib-table, fp-lib-table  -> these are the actual design
+
+# ---- e-psu generators and simulation (intermediate files) ----
+scripts/pcb/work/
+scripts/pcb/work_*.log
+scripts/tools/
+simulation/work/
 __pycache__/
 *.pyc
+
+# ---- kicad-bot ----
+kicad-bot-output/
+*.kicad_bot_metrics.json
+
+# ---- Claude / Claude Code ----
+.claude/settings.local.json
+.claude/*.local.json
+# keep CLAUDE.md and .claude/settings.json + .claude/commands/ tracked (shared config)
+
+# ---- Secrets (distributor APIs, Anthropic keys) ----
+.env
+.env.*
+!.env.example
+
+# ---- OS / editor cruft ----
+.DS_Store
+Thumbs.db
+.vscode/*.local
