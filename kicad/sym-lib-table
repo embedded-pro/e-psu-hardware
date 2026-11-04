@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name "e-psu")(type "KiCad")(uri "${KIPRJMOD}/e-psu.kicad_sym")(options "")(descr "e-psu project symbols"))
+)

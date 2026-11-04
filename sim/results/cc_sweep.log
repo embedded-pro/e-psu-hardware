@@ -1,0 +1,10 @@
+cc_asdrawn: 24 cases, 3 errors, worst PM -11.2, PM<45: 12, PM<0: 6
+   ERR 12.0 3A None 0.0 cc_asdrawn_3: no DC solution matching the settled state (settled outp=5.337394948444707)
+   ERR 12.0 3A None 1e-05 cc_asdrawn_4: no DC solution matching the settled state (settled outp=5.337394948444707)
+   ERR 12.0 3A None 0.001 cc_asdrawn_5: no DC solution matching the settled state (settled outp=5.337394948444707)
+cc_proposed: 48 cases, 6 errors, worst PM 91.0, PM<45: 0, PM<0: 0
+   ERR 12.0 3A None 0.0 cc_proposed_3: no DC solution matching the settled state (settled outp=5.337377567430727)
+   ERR 12.0 3A None 1e-05 cc_proposed_4: no DC solution matching the settled state (settled outp=5.337377567430727)
+   ERR 12.0 3A None 0.001 cc_proposed_5: no DC solution matching the settled state (settled outp=5.337377567430727)
+   ERR 12.0 3A None 0.0 cc_proposed_27: no DC solution matching the settled state (settled outp=5.342497839691536)
+   ERR 12.0 3A None 1e-05 cc_proposed_28: no DC solution matching the settled state (settled outp=5.342497839691536)

@@ -1,0 +1,36 @@
+* Generic rail-to-rail op-amp macromodel used for TI OPA192 / OPA2192.
+* Not the TI model: dominant pole (GBW, Aol), second pole (FP2), slew limit (SR),
+* open-loop output resistance (RO), output swing VSAT from the rails, integrator clamp
+* near the rails (overload recovery). Parameters from the OPA192 datasheet; see README.
+.subckt OPAMP_RRIO inp inn vcc vee out PARAMS: GBW=10e6 SR=20e6 AOL=5e6 FP2=17e6 RO=375 VSAT=0.02
+.param CC=10n
+.param GMV={6.283185307*GBW*CC}
+.param IMAX={SR*CC}
+.param R1V={AOL/GMV}
+.param C2V={1/(6.283185307*1e3*FP2)}
+Bmid mid 0 V=(V(vcc)+V(vee))/2
+B1 mid n1 I={IMAX}*tanh({GMV}*(V(inp)-V(inn))/{IMAX})
+C1 n1 mid {CC}
+R1 n1 mid {R1V}
+Bch ch 0 V=V(vcc)-0.35
+Bcl cl 0 V=V(vee)+0.35
+Dch n1 ch DCLAMP
+Dcl cl n1 DCLAMP
+G2 mid n2 n1 mid 1m
+R2 n2 mid 1k
+C2 n2 mid {C2V}
+Bo oi 0 V=min(max(V(n2), V(vee)+{VSAT}), V(vcc)-{VSAT})
+Ro oi out {RO}
+.model DCLAMP D(Is=1e-12 N=1 Rs=1)
+.ends
+
+* Current-sense amplifier: gain G, single pole BW, slew limit SR, output clamped to [gnd+5 mV, vs-VSW].
+.subckt INA_BEHAV inp inn vs gnd out PARAMS: G=50 BW=1e6 SR=2e6 VSW=0.03
+.param CN=1n
+Bt t 0 V=min(max({G}*(V(inp)-V(inn)), V(gnd)+0.005), V(vs)-{VSW})
+Bi 0 n I={CN*SR}*tanh(6.283185307*{BW}*(V(t)-V(n))/{SR})
+Cn n 0 {CN}
+Rn n 0 1e9
+Eo oi 0 n 0 1
+Ro oi out 2
+.ends

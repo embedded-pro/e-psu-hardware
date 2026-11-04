@@ -1,0 +1,16 @@
+# KiCad
+*.kicad_prl
+*-backups/
+fp-info-cache
+*.lck
+\#auto_saved_files#
+
+# generated / bulky
+sim/work/
+pcb/work/
+pcb/work_*.log
+tools/
+
+# Python
+__pycache__/
+*.pyc
