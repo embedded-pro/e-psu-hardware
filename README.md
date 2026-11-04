@@ -128,7 +128,7 @@ e-psu-hardware/
 │   └── images/                     # board renders
 ├── .claude/agents/psu-board-reviewer.md   # design-review agent
 ├── PROJECT_CONTEXT.md              # design summary, decisions, open items
-└── .github/workflows/              # CI: kicad-bot, kicad-diff, release
+└── .github/workflows/              # CI: kicad-bot, kicad-diff, pcb-quality, release
 ```
 
 > Each board is a self-contained KiCad project in its own `hardware/<board>/` folder. The `.kicad_pro`, root schematic and board share that folder. Generated outputs are gitignored and go to `review_exports/<board>/`, `manufacturing/<board>/` and `release/`.
@@ -193,6 +193,7 @@ Every push and pull request is checked by [**kicad-bot**](https://github.com/emb
 - **ERC / DRC verification:** electrical and design-rule checks, with schematic parity.
 - **BOM availability:** distributor stock and lifecycle flags (not available in kicad-bot yet).
 - **Visual diffs:** for pull requests, [`kicad-diff.yml`](.github/workflows/kicad-diff.yml) renders the base and head with `kicad-cli` and uploads red/green overlays.
+- **Layout quality:** for pull requests, [`pcb-quality.yml`](.github/workflows/pcb-quality.yml) runs DRC plus geometry gates (45° discipline, jogs, acute corners, segments and vias per connection) with `pcb_rules.py` from the [`pcb-design-rules`](https://github.com/gabrielfrasantos/claude-hardware-skills/tree/main/plugins/hardware-design/skills/pcb-design-rules) skill. The report is in the job summary. It stays red until the board is re-laid out.
 
 The workflow is [`.github/workflows/kicad-bot.yml`](.github/workflows/kicad-bot.yml). It uploads a `kicad-bot-output-<board>` artifact containing the report, metrics and raw violation data.
 
