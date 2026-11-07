@@ -27,7 +27,9 @@ K = 3                           # minimum straight run (cells) before the next t
 TURN = 0.6                      # cost of a 45-degree turn, mm
 VIA_COST = 2.5                  # cost of a via, mm
 WRONG_WAY = 1.25                # cost factor against the layer's preferred direction
-DIAG = 1.12                     # cost factor for 45-degree runs (keeps them to short transitions)
+DIAG = 1.5                      # cost factor for 45-degree runs: a diagonal cell (1.41 x 1.5 = 2.1) costs more than
+                                # a step across and a step along (2), so runs are horizontal or vertical and the
+                                # 45-degree pieces stay short transitions between them
 HW = 1.3                        # heuristic weight (weighted A*: much faster, paths within a few % of optimal)
 VIA_D, VIA_DRILL = 0.6, 0.3
 EDGE = 0.5
@@ -270,9 +272,8 @@ class Router:
         def h(i, j):
             if gcx is None:
                 return 0.0
-            dx, dy = abs(i - gcx), abs(j - gcy)
-            d = (max(dx, dy) - min(dx, dy)) + 1.41421356 * min(dx, dy)
-            return max(0.0, d - grad) * G
+            # Manhattan: with diagonals dearer than a step across plus a step along, it is the lower bound
+            return max(0.0, abs(i - gcx) + abs(j - gcy) - grad) * G
 
         def ok(l, i, j):
             if i < bi0 or i > bi1 or j < bj0 or j > bj1:

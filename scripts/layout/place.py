@@ -49,6 +49,8 @@ ANCHORS = {
     "U301": (60.0, 21.0, 0),          # INA293 under R301, pin 3 under pad 1 and pin 4 under pad 2 (Kelvin)
     # back-to-back output switch in the top-right corner: relay common -> Q502 drain | sources | Q503 drain -> J501
     "Q502": (113.0, 4.5, 180), "Q503": (121.0, 4.5, 0),
+    # MCU and crystal (the user's, same relative position), moved right for a compact analog loop
+    "U601": (92.0, 47.0, 180), "Y601": (101.5, 48.6, 90),
     "D502": (114.0, 11.0, 0),         # output TVS under the switch, cathode towards J501 pin 1
     # photovoltaic gate driver and gate pull-down below the switch (copper.HAND reaches both gates)
     "U502": (114.0, 16.75, 0), "R504": (117.5, 20.25, 0),
@@ -67,11 +69,13 @@ REGIONS = {
     "buck":  [(21.0, 26.5, 62.4, 58.9)],
     "lin":   [(21.0, 13.8, 68.4, 26.5), (21.0, 7.9, 38.0, 13.8)],
     "chain": [(63.0, 14.6, 109.3, 24.5)],
-    "rsense": [(76.5, 14.6, 109.3, 24.5), (63.0, 14.6, 109.3, 27.0), (82.4, 24.5, 112.0, 30.0)],
+    "rsense": [(76.5, 14.6, 109.3, 24.5), (63.0, 14.6, 109.3, 27.0), (84.0, 24.5, 112.0, 30.0)],
     "out":   [(99.3, 0.6, 132.0, 8.4), (109.3, 8.4, 119.3, 24.0), (119.3, 21.9, 139.4, 36.0)],
-    "iso":   [(82.4, 24.5, 112.0, 46.0)],
-    "amp":   [(112.0, 24.5, 139.4, 58.1), (82.4, 46.0, 112.0, 58.1)],
-    "mcu":   [(62.4, 24.5, 82.4, 49.0)],
+    # CV/CC error amps and DAC between the pass element's gate drive (lin), the CC shunt amplifier (U301)
+    # and the ranging chain: the analog loop stays compact. The MCU moves right, next to the user interface.
+    "amp":   [(62.4, 24.5, 84.0, 49.0)],
+    "iso":   [(84.0, 24.5, 112.0, 40.0), (112.0, 24.5, 139.4, 36.0)],
+    "mcu":   [(84.0, 40.0, 116.0, 58.1), (116.0, 36.0, 139.4, 58.1)],
     "usbm":  [(60.0, 44.0, 82.0, 64.0)],
     "ui":    [(76.6, 58.9, 119.3, 79.4)],
 }
@@ -208,7 +212,7 @@ def run(path):
 
     placed = {}
     for ref, f in fps.items():
-        if f.IsLocked():
+        if f.IsLocked() and ref not in ANCHORS:
             placed[ref] = crtyd(f)
     for ref, (x, y, rot) in ANCHORS.items():
         f = fps[ref]
@@ -246,6 +250,12 @@ def run(path):
             labels[ref] = sp
     for i, k in enumerate(KEEPOUTS):
         placed[f"__keepout{i}"] = k
+    # the power pours (copper.POURS, between anchor pads) are planned copper: no part goes on them
+    from shapely.geometry import box as sbox
+    from shapely.ops import unary_union as sunion
+    from shapely.prepared import prep
+    pours = sunion([copper.corridor(board, specs, w) for net, (layers, w, specs, pri) in copper.POURS.items()])
+    on_pour = prep(pours.buffer(GAP))
     # the isolated USB island and its gap: only the USB-side parts go in there
     isl = copper.usb_island(board)
     REGIONS["usbiso"] = [tuple(isl.buffer(-0.8, join_style=2).bounds)]
@@ -300,8 +310,11 @@ def run(path):
     unplaced = []
     while todo:
         # most connections to already-placed parts first; ICs before passives on ties
-        todo.sort(key=lambda r: (-(area(r) > 40), -sum(len(v) for k, v in targets(r).items() if k != "__pin__"),
-                                 not r.startswith("U"), r))
+        def links(r):
+            tg_ = targets(r)
+            # decoupling caps go right after their IC, before other passives take the space at its pins
+            return 100 if "__pin__" in tg_ else sum(len(v) for k, v in tg_.items() if k != "__pin__")
+        todo.sort(key=lambda r: (-(area(r) > 40), -links(r), not r.startswith("U"), r))
         ref = todo.pop(0)
         f = fps[ref]
         regs = REGIONS[region_of(ref, nets_of)]
@@ -337,6 +350,8 @@ def run(path):
                         if any(overlap(r, o, GAP) for k, o in placed.items() if not (k == "__usb" and ref in copper.USB_AUTO)):
                             continue
                         if any(overlap(r, o, 0.0) for o in labels.values()):
+                            continue
+                        if on_pour.intersects(sbox(*r)):
                             continue
                         cost = 0.0
                         for num, px, py in pads:
