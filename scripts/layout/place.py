@@ -35,20 +35,31 @@ ANCHORS = {
     "C101": (10.6, 41.5, 180),
     # tracking buck: VIN/PGND on the left (input caps), SW at the bottom into L201, control pins face the MCU
     "U201": (36.0, 30.4, 90),
-    "L201": (36.0, 42.0, 90),
+    "C201": (31.7, 28.6, 90),        # input caps against the VIN/PGND pin column: smallest hot loop
+    "C202": (28.4, 28.6, 90),
+    "L201": (36.0, 42.0, 270),       # SW pad up against U201's SW pins, VPRE pad down
     "C211": (32.0, 54.3, 0),
-    # 15 mOhm CC shunt at the head of the ranging chain
+    # 15 mOhm CC shunt at the head of the ranging chain, then two compact shunt columns:
+    # shunt / bypass FET / clamp diodes, VFORCE -> N_MID -> VSENSE -> K501 pin 12
     "R301": (50.0, 16.5, 0),
+    "U301": (50.0, 21.0, 0),          # INA293 under R301, pin 3 under pad 1 and pin 4 under pad 2 (Kelvin)
+    # back-to-back output switch in the top-right corner: relay common -> Q502 drain | sources | Q503 drain -> J501
+    "Q502": (93.0, 4.5, 180), "Q503": (101.0, 4.5, 0),
+    "R401": (58.0, 17.5, 0), "Q401": (58.0, 21.0, 180), "D401": (58.0, 24.7, 0),
+    "R402": (64.0, 17.5, 0), "Q402": (64.0, 21.0, 180), "D402": (64.0, 24.7, 0),
 }
+
+# placement keep-outs (x0, y0, x1, y1): the 10 A pass-through band from R501 to K501 pin 14 on F.Cu
+KEEPOUTS = [(28.0, 7.4, 62.0, 13.8)]
 
 # block regions (x0, y0, x1, y1), local mm. Several rectangles per block are allowed.
 REGIONS = {
     "inp":   [(0.6, 21.9, 20.9, 36.0), (0.6, 36.0, 20.9, 47.2)],
     "hk":    [(0.6, 47.2, 20.9, 58.1), (20.9, 58.9, 51.0, 79.4)],
     "buck":  [(21.0, 26.5, 52.4, 58.9)],
-    "lin":   [(21.0, 7.9, 58.4, 26.5)],
+    "lin":   [(21.0, 13.8, 58.4, 26.5), (21.0, 7.9, 28.0, 13.8)],
     "chain": [(53.0, 14.6, 89.3, 24.5)],
-    "rsense": [(53.0, 14.6, 89.3, 24.5), (72.4, 24.5, 92.0, 30.0)],
+    "rsense": [(66.5, 14.6, 89.3, 24.5), (53.0, 14.6, 89.3, 27.0), (72.4, 24.5, 92.0, 30.0)],
     "out":   [(89.3, 0.6, 112.0, 8.4), (89.3, 8.4, 99.3, 24.0), (99.3, 21.9, 119.4, 36.0)],
     "iso":   [(72.4, 24.5, 92.0, 46.0)],
     "amp":   [(92.0, 24.5, 119.4, 58.1), (72.4, 46.0, 92.0, 58.1)],
@@ -166,6 +177,8 @@ def run(path):
         x, y = pcbnew.ToMM(f.GetPosition().x) - OX, pcbnew.ToMM(f.GetPosition().y) - OY
         if ref not in placed and 0 < x < BW and 0 < y < BH:
             placed[ref] = crtyd(f)
+    for i, k in enumerate(KEEPOUTS):
+        placed[f"__keepout{i}"] = k
     print("fixed:", len(placed))
 
     def targets(ref):

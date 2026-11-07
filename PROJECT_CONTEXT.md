@@ -87,28 +87,28 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
   - The analog CC loop can't limit below about 30 mA.
   - Down-programming with no load is slow.
 
-## PCB (rev A, `hardware/e-psu/e-psu.kicad_pcb`, `scripts/pcb/`)
+## PCB (rev B, `hardware/e-psu/e-psu.kicad_pcb`, `scripts/layout/`, KiCad 10)
 
-- **Board:** 100 × 100 mm, 4 layers: F signals and pours / In1 GND plane / In2 power planes / B signals and pours. JLCPCB standard process; specify 1 oz inner copper.
-- **Placement:** follows the 3D mockup.
-  - Banana jacks overhang the left and right edges.
-  - Q301 (TO-247) sits at the right edge with its tab facing outward, for a heatsink.
-  - The MCU is rotated 180° so its pins face their loads.
-  - Escape room is kept clear around U601, U201 and U304.
-- **Power copper:**
-  - 10 A path as 3-layer pours with via arrays.
-  - Ranging chain as three copper bars: VFORCE → N_MID → VSENSE.
-  - VPRE and VSENSE corridors on In2.
-  - Kelvin traces on R501 and R301. U501 is rotated, and its IN+ crosses on B.Cu.
-- **In1 splits:** GND_USB under the PC side of the ADuM3160; VFORCE under the isolated ranging driver.
-- **Routing:** scripted.
-  - Plane fan-out, including QFN ground pins tied to the exposed pad.
-  - Own grid router with rip-up, driven by KiCad DRC. Freerouting 2.1 left about 60 connections open on this board.
-  - Escape rings around fine-pitch ICs.
-  - Rebuild: `cd scripts/pcb && python3 make_board.py --own`, then `--tidy` if DRC shows anything.
-- **Status:** fully routed. 244 parts, 887 vias. KiCad DRC: 0 errors, 0 unconnected, 39 silkscreen warnings.
-- **Fab:** `scripts/export_jlcpcb.py` writes Gerbers, BOM and CPL to `manufacturing/e-psu/` (gitignored). Every GitHub Release attaches a bundle. JLC 4-layer, 1.6 mm, 1 oz inner.
-- **Gotcha:** saving a board from Python makes KiCad overwrite the .kicad_pro net-class patterns, so call `copper.write_project()` after every save and run DRC in a fresh process.
+- **Board:** 120 × 80 mm (widened 10 mm each side from the user's 100 × 80 outline), 4 layers:
+  F signals and pours / In1 GND plane / In2 +3V3 plane with power corridors / B signals and pours.
+  JLCPCB or Seeed standard process; specify 1 oz inner copper.
+- **Rules:** `pcb_rules.py apply --fab jlcpcb,seeed --netclasses` (pcb-design-rules skill): strictest of both
+  fabs, copper-safety checks at error, `track_angle (min 135)` (45° corners only).
+- **Placement:** the user's locked anchors (banana jacks on the left/right edges, M3 holes, MCU and crystal,
+  USB section) plus `scripts/layout/place.py`.
+  - Q301 (TO-247) at the top edge, tab up, for an off-board heatsink.
+  - 10 A pass-through along the top: J101 → F102 → R501 → K501 pin 14; relay common → back-to-back output
+    FETs (Q502/Q503) in the top-right corner → J501.
+  - Ranging chain as two compact shunt columns (R401/Q401/D401, R402/Q402/D402) between R301 and K501 pin 12.
+  - Buck: U201 with its input caps against the VIN/PGND pins, L201 below, VPRE caps around L201's output.
+- **Power copper (`copper.py`):** pours along each power path (10 A band on F.Cu and B.Cu, 5 A paths on F.Cu),
+  In2 corridors for VIN_PROT, VPRE and Q301's source, via arrays (about 1 A per via) at every SMD end,
+  GND_USB island under the USB side of the ADuM3160.
+- **Routing (`octoroute.py`):** own octilinear grid router that meets the gates by construction (45° bends only,
+  no jogs, tracks start and end on pads/pours/plane vias, no mid-track branches). Kelvin sense traces from the
+  inner pad halves of R501, R301, R401 and R402 are routed first and protected by no-fill strips.
+  Freerouting 2.1 could not route this board (about 200 connections open after four passes).
+- **Rebuild:** `scripts/layout/build.sh <placement-commit>`; review with `review.py`, check with `pcb_rules.py check`.
 
 ## Still to check or do
 
