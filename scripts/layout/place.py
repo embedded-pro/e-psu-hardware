@@ -12,6 +12,7 @@ import re
 import sys
 
 from kc import pcbnew
+import copper
 
 OX, OY = 30.0, 59.92          # board top-left on the KiCad page
 BW, BH = 140.0, 80.0
@@ -112,7 +113,7 @@ def region_of(ref, nets_of):
             return "ui"
         return "mcu"
     if s == 7:
-        return "usbm"
+        return "usbiso" if ref in copper.USB_AUTO else "usbm"
     return "mcu"
 
 
@@ -245,6 +246,11 @@ def run(path):
             labels[ref] = sp
     for i, k in enumerate(KEEPOUTS):
         placed[f"__keepout{i}"] = k
+    # the isolated USB island and its gap: only the USB-side parts go in there
+    isl = copper.usb_island(board)
+    REGIONS["usbiso"] = [tuple(isl.buffer(-0.8, join_style=2).bounds)]
+    placed["__usb"] = tuple(isl.buffer(copper.USB_GAP + 0.3, join_style=2).bounds)
+    print("USB island", [round(v, 2) for v in isl.bounds])
     print("fixed:", len(placed), "labels", len(labels))
 
     def targets(ref):
@@ -328,7 +334,7 @@ def run(path):
                         r = (c[0] + x, c[1] + y, c[2] + x, c[3] + y)
                         if not inside(r, reg) or r[0] < EDGE or r[1] < EDGE or r[2] > BW - EDGE or r[3] > BH - EDGE:
                             continue
-                        if any(overlap(r, o, GAP) for o in placed.values()):
+                        if any(overlap(r, o, GAP) for k, o in placed.items() if not (k == "__usb" and ref in copper.USB_AUTO)):
                             continue
                         if any(overlap(r, o, 0.0) for o in labels.values()):
                             continue

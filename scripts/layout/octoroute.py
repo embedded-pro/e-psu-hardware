@@ -37,6 +37,7 @@ DIRS = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
 PREF = {0: (0, 4), 1: (2, 6)}   # preferred directions per layer index: F horizontal, B vertical
 CLASS = {"Default": (0.2, 0.15), "Power": (0.3, 0.15), "HighCurrent": (0.3, 0.2), "USB": (0.2, 0.15)}
 PLANES = {"GND": "In1.Cu", "GND_USB": "In1.Cu", "+3V3": "In2.Cu"}
+DENSE_FIRST = ("U601", "U201")    # LQFP-64 and WQFN-30: their pins need the space next to them
 FREE, BLOCK = -1, -2
 
 
@@ -840,9 +841,11 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
     kdone, ktracks = kelvin(r) if net_re == ".*" else (set(), [])
     print("kelvin", len(kdone), "of", len(KELVIN), flush=True)
     jobs = plan(r, net_re, skip_re, kdone)
-    # plane fan-out first (short stubs next to the pads), then signal connections, shortest first
-    # nets that failed in an earlier run go first; then plane fan-out; then the rest, shortest first
-    jobs.sort(key=lambda j: (j[2] not in first, j[1] != "plane", j[0]))
+    # the fine-pitch ICs' pins escape first, while the space around them is free; then plane fan-out
+    # (short stubs next to the pads); then the rest, shortest first. --first nets go before all of them.
+    dense = {n for p, ref, n, nid, g, ls in r.pads if ref in DENSE_FIRST and n and n not in PLANES}
+    jobs.sort(key=lambda j: (j[2] not in first, j[2] not in dense, j[1] != "plane", j[0]))
+    print("fine-pitch nets first:", len(dense), flush=True)
     print("jobs", len(jobs), "planes", sum(j[1] == "plane" for j in jobs), flush=True)
     masks = {}
     made = {}           # job index -> board items

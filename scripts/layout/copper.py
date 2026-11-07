@@ -276,6 +276,20 @@ def via_arrays(board, d=0.6, drill=0.3, pitch=1.0):
     return made
 
 
+USB_AUTO = ["C704", "C705"]      # USB-side decoupling the placer puts inside the island
+
+
+def usb_island(board):
+    """The isolated USB ground island: a rectangle (square corners, as asked) around the USB-side parts the
+    user placed and the USB-side pin row of the ADuM3160, 1 mm beyond their pads (local mm)."""
+    usb = unary_union([pad_shape(p, 0.8) for r in USB_SIDE for p in board.FindFootprintByReference(r).Pads()])
+    u702 = board.FindFootprintByReference("U702")
+    usb = unary_union([usb] + [pad_shape(p, 0.8) for p in u702.Pads() if p.GetNetname() in
+                               ("GND_USB", "Net-(U702-VBUS1)") or "UD" in p.GetNetname() or "PDEN" in p.GetNetname()])
+    x0, y0, x1, y1 = usb.buffer(1.0, join_style=2).bounds
+    return box(x0, y0, x1, BH)
+
+
 def hand(board):
     """HAND tracks and vias, locked so the router never rips them."""
     n = 0
@@ -321,12 +335,7 @@ def run(path):
             board.Remove(t)
     print("hand-routed items:", hand(board))
     edge = box(INSET, INSET, BW - INSET, BH - INSET)
-    usb = unary_union([pad_shape(p, 0.8) for r in USB_SIDE for p in board.FindFootprintByReference(r).Pads()])
-    # USB side of the isolator: its bottom pin row joins the island
-    u702 = board.FindFootprintByReference("U702")
-    usb = unary_union([usb] + [pad_shape(p, 0.8) for p in u702.Pads() if p.GetNetname() in
-                               ("GND_USB", "Net-(U702-VBUS1)") or "UD" in p.GetNetname() or "PDEN" in p.GetNetname()])
-    island = usb.convex_hull.buffer(1.0, join_style=2).intersection(edge)
+    island = usb_island(board).intersection(edge)
     cut = island.buffer(USB_GAP, join_style=2)
     count = 0
     count += add_zone(board, "GND", "In1.Cu", edge.difference(cut), 0, solid=False)
