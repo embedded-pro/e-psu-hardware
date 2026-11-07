@@ -33,7 +33,7 @@ ANCHORS = {
     "R501": (35.5, 10.5, 0),
     # precision path: fuse, reverse-polarity P-FET, TVS, bulk cap, under the input jack
     "F101": (8.5, 24.5, 180),
-    "D101": (17.0, 24.6, 0),
+    "D101": (17.0, 24.6, 180),       # GND pad on the right, out of the input pour
     "Q101": (11.0, 31.5, 180),
     "C101": (10.6, 41.5, 180),
     # tracking buck: VIN/PGND on the left (input caps), SW at the bottom into L201, control pins face the MCU
@@ -49,6 +49,8 @@ ANCHORS = {
     # back-to-back output switch in the top-right corner: relay common -> Q502 drain | sources | Q503 drain -> J501
     "Q502": (113.0, 4.5, 180), "Q503": (121.0, 4.5, 0),
     "D502": (114.0, 11.0, 0),         # output TVS under the switch, cathode towards J501 pin 1
+    # photovoltaic gate driver and gate pull-down below the switch (copper.HAND reaches both gates)
+    "U502": (114.0, 16.75, 0), "R504": (117.5, 20.25, 0),
     "R401": (68.0, 17.5, 0), "Q401": (68.0, 21.0, 180), "D401": (68.0, 24.7, 0),
     "R402": (74.0, 17.5, 0), "Q402": (74.0, 21.0, 180), "D402": (74.0, 24.7, 0),
 }

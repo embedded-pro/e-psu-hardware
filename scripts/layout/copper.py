@@ -30,7 +30,8 @@ POURS = {
     # relay common to the output switch through the channel between the relay's two pin rows
     PT + "SW_IN":               (("F.Cu", "B.Cu"), 4.0, ["K501.11", "@75.7,7.35", "@98.5,7.35", "@108.5,7.35", "Q502.5"], 5),
     PT + "SRC_COM":             (("F.Cu",), 3.0, ["Q502.1", "Q502.3", "Q503.1", "Q503.3"], 5),
-    PT + "OUT_P":               (("F.Cu", "B.Cu"), 5.0, ["Q503.5", "J501.1", "D502.2"], 5),
+    # Q503's drain tab to J501, then over to the TVS; kept clear of Q503's gate pin
+    PT + "OUT_P":               (("F.Cu", "B.Cu"), 5.0, ["Q503.5", "@124.5,8.0", "J501.1", "@120.5,11.0", "D502.2"], 5),
     "Net-(Q101-D)":             (("F.Cu",), 3.0, ["F101.2", "Q101.2"], 5),
     "VIN_PROT":                 (("F.Cu",), 2.5, ["Q101.3", "C101.1", "C202.1", "C201.1"], 4),
     "VPRE":                     (("F.Cu",), 2.5, ["L201.2", "C211.1"], 4),
@@ -47,6 +48,10 @@ IN2 = {
     "VPRE":     (4.0, ["L201.2", "C211.1", "Q301.2"], 3),
     # Q301 source to the CC shunt crosses under the 10 A band on In2, beside VPRE
     "Net-(D304-K)": (3.5, ["Q301.3", "@55.9,10.0", "@52.6,13.3", "@52.6,16.5", "R301.1"], 4),
+    # the relay's pins are doubled; the 10 A band separates the two VSENSE pins and cuts the coil's +5V pin
+    # off from the board on both outer layers, so they meet below it on In2
+    "VSENSE": (1.5, ["@80.7,3.6", "@80.7,11.1"], 4),
+    "+5V":    (1.5, ["@96.0,3.6", "@99.2,6.8", "@99.2,15.5"], 4),
 }
 # Kelvin windows: no pour between a shunt's pads and in a strip across the current path, so the sense
 # traces reach the inner pad edges without touching the power copper
@@ -54,7 +59,8 @@ SHUNTS = []          # not needed with flat-ended corridors that stop at the pad
 KELVIN_SHUNTS = {"R501", "R301", "R401", "R402"}
 # signal crossings through the 10 A band: gaps in its B.Cu copy (F.Cu carries the full current there)
 # Q301's gate pin sits above the band at the top edge; the gate drive reaches it on B.Cu through this gap
-B_CROSSINGS = [box(43.2, 4.6, 46.8, 15.5)]
+B_CROSSINGS = [box(43.2, 4.6, 46.8, 15.5),
+               box(114.0, 7.75, 117.6, 14.8)]    # the gate tracks of Q502/Q503 pass under the OUT_P branch
 
 # via arrays joining the layers of a power path at its SMD ends (about 1 A per 0.3 mm via)
 # (net, anchor pad, count): vias go where every layer of the net's copper overlaps, nearest the anchor first
@@ -63,6 +69,18 @@ VIA_ARRAYS = [
     ("/Pass-through & output switch/SW_IN", "Q502.5", 10), ("/Pass-through & output switch/OUT_P", "Q503.5", 10),
     ("VPRE", "L201.2", 6), ("VIN_PROT", "Q101.3", 6), ("VIN_PROT", "C201.1", 6), ("Net-(D304-K)", "R301.1", 6),
 ]
+# hand-routed gate drive of the back-to-back output FETs: the source pour between them and the drain
+# pours around them leave the gate pins no exit, so each gate gets a via to B.Cu (net, layer, points)
+GATE = "Net-(Q502-G)"
+HAND = [
+    (GATE, "F.Cu", [(116.05, 2.6), (116.45, 2.6), (117.0, 2.05)]),      # Q502 gate -> via A
+    (GATE, "B.Cu", [(117.0, 2.05), (117.0, 7.4)]),                       # via A -> via B
+    (GATE, "F.Cu", [(117.0, 7.4), (117.9, 6.5)]),                        # via B -> Q503 gate
+    (GATE, "F.Cu", [(115.5, 1.2), (115.5, 2.45)]),                       # via D -> Q502 gate
+    (GATE, "B.Cu", [(115.5, 1.2), (115.5, 14.3)]),                       # via D -> via C
+    (GATE, "F.Cu", [(115.5, 14.3), (116.45, 15.25)]),                    # via C -> U502 pin 4
+]
+HAND_VIAS = [(GATE, (117.0, 2.05)), (GATE, (117.0, 7.4)), (GATE, (115.5, 1.2)), (GATE, (115.5, 14.3))]
 USB_SIDE = ["J701", "U701", "C701", "C702", "C703", "FB701", "R701", "R702", "R703", "R704", "R705"]
 
 
@@ -258,6 +276,28 @@ def via_arrays(board, d=0.6, drill=0.3, pitch=1.0):
     return made
 
 
+def hand(board):
+    """HAND tracks and vias, locked so the router never rips them."""
+    n = 0
+    for net, layer, pts in HAND:
+        for a, b in zip(pts, pts[1:]):
+            t = pcbnew.PCB_TRACK(board)
+            t.SetStart(pcbnew.VECTOR2I(nm(OX + a[0]), nm(OY + a[1])))
+            t.SetEnd(pcbnew.VECTOR2I(nm(OX + b[0]), nm(OY + b[1])))
+            t.SetWidth(nm(0.25)); t.SetLayer(getattr(pcbnew, layer.replace(".", "_"))); t.SetNet(board.FindNet(net))
+            t.SetLocked(True)
+            board.Add(t)
+            n += 1
+    for net, (x, y) in HAND_VIAS:
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pcbnew.VECTOR2I(nm(OX + x), nm(OY + y)))
+        v.SetWidth(nm(0.6)); v.SetDrill(nm(0.3)); v.SetNet(board.FindNet(net)); v.SetViaType(pcbnew.VIATYPE_THROUGH)
+        v.SetLocked(True)
+        board.Add(v)
+        n += 1
+    return n
+
+
 def solid_thermal_vias(board):
     """Exposed-pad thermal vias (plated holes sharing an SMD pad's number) join every plane solid:
     thermal spokes on 0.65 mm pads would starve them (KiCad starved_thermal) and add thermal resistance."""
@@ -276,6 +316,10 @@ def run(path):
     for z in list(board.Zones()):
         board.Remove(z)
     print("thermal vias joined solid:", solid_thermal_vias(board))
+    for t in list(board.GetTracks()):
+        if t.IsLocked() and t.GetNetname() == GATE:
+            board.Remove(t)
+    print("hand-routed items:", hand(board))
     edge = box(INSET, INSET, BW - INSET, BH - INSET)
     usb = unary_union([pad_shape(p, 0.8) for r in USB_SIDE for p in board.FindFootprintByReference(r).Pads()])
     # USB side of the isolator: its bottom pin row joins the island

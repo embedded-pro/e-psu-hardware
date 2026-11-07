@@ -680,6 +680,9 @@ def attempt_job(r, job, masks, soft=False, big=False):
     res = r.route(net, starts, goals, plane_goal=pg, margin=6.0, soft=soft)
     if res is None:
         res = r.route(net, starts, goals, plane_goal=pg, margin=20.0, max_exp=1500000, soft=soft)
+    if res is None:
+        # long connections run out of search before they run out of room: a greedier search finds them
+        res = r.route(net, starts, goals, plane_goal=pg, margin=30.0, max_exp=1500000, soft=soft, weight=2.0)
     if res is None and big:
         res = r.route(net, starts, goals, plane_goal=pg, margin=35.0, max_exp=3000000, soft=soft, weight=2.0)
     return res
