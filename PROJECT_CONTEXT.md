@@ -87,37 +87,14 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
   - The analog CC loop can't limit below about 30 mA.
   - Down-programming with no load is slow.
 
-## PCB (rev B, `hardware/e-psu/e-psu.kicad_pcb`, `scripts/layout/`, KiCad 10)
+## PCB (rev B, `hardware/e-psu/e-psu.kicad_pcb`, KiCad 10)
 
-- **Board:** 140 × 80 mm (widened 20 mm each side from the user's 100 × 80 outline; MCU and USB-C stay
-  centred), 4 layers:
-  F signals and pours / In1 GND plane / In2 +3V3 plane with power corridors / B signals and pours.
-  JLCPCB or Seeed standard process; specify 1 oz inner copper.
-- **Rules:** `pcb_rules.py apply --fab jlcpcb,seeed --netclasses` (pcb-design-rules skill): strictest of both
-  fabs, copper-safety checks at error, `track_angle (min 135)` (45° corners only).
-- **Placement:** the user's locked anchors (banana jacks on the left/right edges, M3 holes, USB section) plus
-  `scripts/layout/place.py`. The MCU and crystal were moved right (user OK) so the CV/CC error amps and DAC sit
-  between the pass element's gate drive, the CC shunt amplifier and the ranging chain (compact analog loop);
-  no part sits on the planned power pours; decoupling caps are placed right after their IC.
-  - Isolated USB: rectangular GND_USB island (square corners, the user's choice) around the USB section;
-    only USB-side parts inside, the ADuM3160 alone across the 1.5 mm gap.
-  - Q301 (TO-247) at the top edge, tab up, for an off-board heatsink.
-  - 10 A pass-through along the top: J101 → F102 → R501 → K501 pin 14; relay common → back-to-back output
-    FETs (Q502/Q503) in the top-right corner → J501.
-  - Ranging chain as two compact shunt columns (R401/Q401/D401, R402/Q402/D402) between R301 and K501 pin 12.
-  - Buck: U201 with its input caps against the VIN/PGND pins, L201 below, VPRE caps around L201's output.
-  - Output TVS D502 between the switch and J501. Parts are kept off the fuse-to-shunt, 10 A and relay-to-switch copper.
-  - Every part gets room for its reference (1.0 mm / 0.15 mm, values hidden); `finish.py` keeps those spots.
-- **Power copper (`copper.py`):** pours along each power path (10 A band on F.Cu and B.Cu, 5 A paths on F.Cu),
-  In2 corridors for VIN_PROT, VPRE and Q301's source, via arrays (about 1 A per via) at every SMD end,
-  GND_USB island under the USB side of the ADuM3160.
-- **Routing (`octoroute.py`):** own octilinear grid router that meets the gates by construction (45° bends only,
-  no jogs, tracks start and end on pads/pours/plane vias, no mid-track branches). Diagonal cells cost more than
-  a step across plus a step along, so runs are horizontal/vertical with short 45° transitions. Kelvin sense traces from the
-  inner pad halves of R501, R301, R401 and R402 are routed first and protected by no-fill strips.
-  Failed connections get a transactional rip-up and reroute (kept only if everything ripped routes again).
-  Freerouting 2.1 could not route this board (about 200 connections open after four passes).
-- **Rebuild:** `scripts/layout/build.sh <placement-commit>`; review with `review.py`, check with `pcb_rules.py check`.
+- **Board:** the user's placement (commit 9a9b748: connectors, holes, MCU and crystal locked), 100 × 80 mm,
+  4 layers. Not routed yet.
+- **Rules:** `pcb_rules.py apply --fab jlcpcb,seeed --netclasses` (pcb-design-rules skill): strictest of JLCPCB
+  and Seeed, copper-safety checks at error, `track_angle (min 135)` (45° corners only), mask web 0.1 mm.
+- **U201 footprint** (`e-psu.pretty/TI_RNP0030B_WQFN-30`): thermal-via pads 0.65 mm (Seeed PTH annular ring
+  0.152 mm) joined solid to the planes. The board still holds the old copy: *Update Footprints from Library*.
 
 ## Still to check or do
 
