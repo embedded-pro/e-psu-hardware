@@ -27,9 +27,9 @@ K = 3                           # minimum straight run (cells) before the next t
 TURN = 0.6                      # cost of a 45-degree turn, mm
 VIA_COST = 2.5                  # cost of a via, mm
 WRONG_WAY = 1.25                # cost factor against the layer's preferred direction
-DIAG = 1.5                      # cost factor for 45-degree runs: a diagonal cell (1.41 x 1.5 = 2.1) costs more than
-                                # a step across and a step along (2), so runs are horizontal or vertical and the
-                                # 45-degree pieces stay short transitions between them
+DIAG = 1.75                     # cost factor for 45-degree runs: a diagonal cell (1.41 x 1.75 = 2.5) costs more than
+                                # a step across plus a step along even against the layer's direction (1 + 1.25), so
+                                # runs are horizontal or vertical and 45-degree pieces stay short corner transitions
 HW = 1.3                        # heuristic weight (weighted A*: much faster, paths within a few % of optimal)
 VIA_D, VIA_DRILL = 0.6, 0.3
 EDGE = 0.5
