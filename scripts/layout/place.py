@@ -49,6 +49,10 @@ ANCHORS = {
     "U301": (60.0, 21.0, 0),          # INA293 under R301, pin 3 under pad 1 and pin 4 under pad 2 (Kelvin)
     # back-to-back output switch in the top-right corner: relay common -> Q502 drain | sources | Q503 drain -> J501
     "Q502": (113.0, 4.5, 180), "Q503": (121.0, 4.5, 0),
+    # USB section (the user's): the ESD array U701, the D+/D- series resistors and the CC resistors moved up
+    # 0.6-2.3 mm, so the connector's D+/D- crossover and VBUS have a 2.4 mm channel above its pad row
+    "R704": (69.0, 62.53, 90), "R705": (71.0, 62.53, 90), "U701": (70.05, 66.36, -90),
+    "R701": (67.25, 66.3, 90), "R702": (73.0, 66.3, 90),
     # MCU and crystal (the user's, same relative position), moved right for a compact analog loop
     "U601": (92.0, 47.0, 180), "Y601": (101.5, 48.6, 90),
     "D502": (114.0, 11.0, 0),         # output TVS under the switch, cathode towards J501 pin 1
