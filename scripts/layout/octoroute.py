@@ -40,6 +40,7 @@ PREF = {0: (0, 4), 1: (2, 6)}   # preferred directions per layer index: F horizo
 CLASS = {"Default": (0.2, 0.15), "Power": (0.3, 0.15), "HighCurrent": (0.3, 0.2), "USB": (0.2, 0.15)}
 PLANES = {"GND": "In1.Cu", "GND_USB": "In1.Cu", "+3V3": "In2.Cu"}
 DENSE_FIRST = ("U601", "U201")    # LQFP-64 and WQFN-30: their pins need the space next to them
+SLIM_ROUNDS = 2
 ESCAPES = (8, 4)                  # cells straight out from a fine-pitch pin's outer end (tried in turn)
 FREE, BLOCK = -1, -2
 
@@ -75,6 +76,8 @@ class Router:
         self.dyn_uuids = set()   # tracks/vias made by this router (rip-up candidates)
         self.locked_uuids = set()  # router-made but never ripped (Kelvin traces)
         self.xs = self.x0 + np.arange(self.W) * G
+        self.via_d, self.via_drill = VIA_D, VIA_DRILL
+        self.slim = False        # repair's last resort: 0.15 mm signal tracks and 0.5/0.3 mm vias
         self.ys = self.y0 + np.arange(self.H) * G
 
     # ---------------------------------------------------------------- geometry collection
@@ -183,7 +186,10 @@ class Router:
             sub[inside] = new
 
     def grid_for(self, net, fixed_only=False):
-        w, c = CLASS[self.netclass.get(net, "Default")]
+        cls = self.netclass.get(net, "Default")
+        w, c = CLASS[cls]
+        if self.slim and cls in ("Default", "USB"):
+            w = 0.15
         key = (w, c, fixed_only)
         if key not in self.grids:
             arr = np.full((2, self.H, self.W), FREE, dtype=np.int32)
@@ -206,20 +212,20 @@ class Router:
         self.collect()
         self.grids = {}
         via = np.full((2, self.H, self.W), FREE, dtype=np.int32)
-        self._edge(via, VIA_D / 2 + EDGE)
+        self._edge(via, self.via_d / 2 + EDGE)
         for ls, g, nid, oc, dyn in self.objs:
-            self.raster(via, ls, g, nid, max(0.15, oc) + VIA_D / 2 + 0.02)
+            self.raster(via, ls, g, nid, max(0.15, oc) + self.via_d / 2 + 0.02)
         # no via in or touching an SMD pad, whatever its net (solder would wick into an open via)
         for p, ref, n, nid, g, ls in self.pads:
             if p.GetAttribute() == pcbnew.PAD_ATTRIB_SMD:
-                self.raster(via, (0, 1), g, BLOCK, VIA_D / 2 + 0.05)
+                self.raster(via, (0, 1), g, BLOCK, self.via_d / 2 + 0.05)
         # vias stay out of other nets' inner-layer corridors (they would neck them)
         for (n, lname), gs in self.fills.items():
             if lname in ("In1.Cu", "In2.Cu") and n not in PLANES:
                 for g in gs:
-                    self.raster(via, (0, 1), g, self.netid.get(n, BLOCK), VIA_D / 2 + 0.25)
+                    self.raster(via, (0, 1), g, self.netid.get(n, BLOCK), self.via_d / 2 + 0.25)
         for ko in self.keepouts:
-            self.raster(via, (0, 1), ko, BLOCK, VIA_D / 2)
+            self.raster(via, (0, 1), ko, BLOCK, self.via_d / 2)
         self.via = via
 
     def add_copper(self, layers, geom, nid, c, dyn=True):
@@ -228,7 +234,7 @@ class Router:
             if fixed_only and dyn:
                 continue
             self.raster(arr, layers, geom, nid, max(cc, c) + w / 2 + 0.02)
-        self.raster(self.via, layers, geom, nid, max(0.15, c) + VIA_D / 2 + 0.02)
+        self.raster(self.via, layers, geom, nid, max(0.15, c) + self.via_d / 2 + 0.02)
 
     # ---------------------------------------------------------------- cells of copper
     def cells_in(self, geom, shrink=0.0):
@@ -412,12 +418,12 @@ class Router:
             x, y = self.x0 + i * G, self.y0 + j * G
             v = pcbnew.PCB_VIA(self.b)
             v.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
-            v.SetWidth(pcbnew.FromMM(VIA_D)); v.SetDrill(pcbnew.FromMM(VIA_DRILL)); v.SetNet(ni)
+            v.SetWidth(pcbnew.FromMM(self.via_d)); v.SetDrill(pcbnew.FromMM(self.via_drill)); v.SetNet(ni)
             v.SetViaType(pcbnew.VIATYPE_THROUGH)
             self.b.Add(v)
             made.append(v)
             self.dyn_uuids.add(v.m_Uuid.AsString())
-            self.add_copper((0, 1), Point(x, y).buffer(VIA_D / 2), nid, c)
+            self.add_copper((0, 1), Point(x, y).buffer(self.via_d / 2), nid, c)
         return made, vias
 
 
@@ -802,7 +808,15 @@ def repair(path, out, rounds=3):
     r.build()
     print("kelvin items locked", nk, flush=True)
     masks = {}
-    for rnd in range(rounds):
+    rnd = 0
+    while rnd < rounds + SLIM_ROUNDS:
+        if rnd == rounds:
+            # last resort for what is still open: slimmer signal tracks and vias (still inside both fabs' standard
+            # process: 0.15 mm track, 0.5/0.3 mm via with a 0.1 mm annular ring)
+            r.slim, r.via_d = True, 0.5
+            r.build(r.keepouts)
+            masks.clear()
+            print("slim mode: 0.15 mm signal tracks, 0.5/0.3 mm vias", flush=True)
         jobs = plan(r, ".*", "^$")
         jobs.sort(key=lambda j: (j[1] != "plane", j[0]))
         print(f"repair round {rnd + 1}: {len(jobs)} open", flush=True)
@@ -867,7 +881,11 @@ def repair(path, out, rounds=3):
             masks.clear()
         print(f"repair round {rnd + 1}: fixed {fixed}", flush=True)
         if not fixed:
-            break
+            if rnd >= rounds:
+                break
+            rnd = rounds                 # nothing more at full size: go slim
+            continue
+        rnd += 1
     left = plan(r, ".*", "^$")
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     pcbnew.SaveBoard(out or path, board)
