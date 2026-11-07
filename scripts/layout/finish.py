@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 import shapely
-from shapely.geometry import Point, box
+from shapely.geometry import LineString, Point, box
 from shapely.ops import unary_union
 
 from kc import pcbnew
@@ -65,66 +65,176 @@ def stitch(board):
     return vias
 
 
+REF_H = 1.0           # reference text height, mm (JLCPCB minimum; Seeed 0.58)
+REF_SMALL = 0.8       # fallback height where 1.0 mm does not fit
+REF_T = 0.15          # stroke width, mm (JLCPCB minimum silk line)
+PAD_GAP = 0.2         # silk to pad, mm (JLCPCB 0.15, Seeed 0.1524)
+LABEL_GAP = 0.3       # between two references
+JACK_LABELS = {"IN+": "J101", "IN-": "J102", "OUT+": "J501", "OUT-": "J502"}
+
+
+def _bbox(bb):
+    return (pcbnew.ToMM(bb.GetLeft()), pcbnew.ToMM(bb.GetTop()), pcbnew.ToMM(bb.GetRight()), pcbnew.ToMM(bb.GetBottom()))
+
+
+def _courtyard(fp):
+    cy = fp.GetCourtyard(pcbnew.F_CrtYd)
+    return _bbox(cy.BBox() if cy.OutlineCount() else fp.GetBoundingBox(False, False))
+
+
 def silk(board):
-    """Put each reference next to its part, clear of every pad, other references and the board edge."""
+    """References on, values off. A reference stays where the placer reserved room for it when that spot is
+    still clear of every pad, every other part's courtyard, the other references and the board edge; the
+    rest are searched for next to their part (then inside its own body for large parts, then at 0.8 mm).
+    Text never goes over another part, where it would be hidden after assembly."""
     pads = []
     for fp in board.GetFootprints():
+        fp.Value().SetVisible(False)
+        ref = fp.Reference()
+        ref.SetVisible(True)
+        ref.SetLayer(pcbnew.B_SilkS if fp.IsFlipped() else pcbnew.F_SilkS)
+        ref.SetTextSize(pcbnew.VECTOR2I(pcbnew.FromMM(REF_H), pcbnew.FromMM(REF_H)))
+        ref.SetTextThickness(pcbnew.FromMM(REF_T))
+        ref.SetKeepUpright(True)
         for p in fp.Pads():
-            bb = p.GetBoundingBox()
-            pads.append(box(pcbnew.ToMM(bb.GetLeft()) - 0.2, pcbnew.ToMM(bb.GetTop()) - 0.2,
-                            pcbnew.ToMM(bb.GetRight()) + 0.2, pcbnew.ToMM(bb.GetBottom()) + 0.2))
-    tree = shapely.STRtree(pads)
+            l, t, r_, b = _bbox(p.GetBoundingBox())
+            pads.append(box(l - PAD_GAP, t - PAD_GAP, r_ + PAD_GAP, b + PAD_GAP))
+    # the parts' own silkscreen (outlines, pin-1 marks): references stay 0.1 mm clear of it
+    for fp in board.GetFootprints():
+        for it in fp.GraphicalItems():
+            if it.GetLayer() != pcbnew.F_SilkS or it.GetClass() in ("PCB_TEXT", "PCB_FIELD", "PCB_TEXTBOX"):
+                continue
+            hw = pcbnew.ToMM(it.GetWidth()) / 2 + 0.1
+            if it.GetShape() == pcbnew.SHAPE_T_SEGMENT:
+                a_, b_ = it.GetStart(), it.GetEnd()
+                g = LineString([(pcbnew.ToMM(a_.x), pcbnew.ToMM(a_.y)), (pcbnew.ToMM(b_.x), pcbnew.ToMM(b_.y))])
+                pads.append(g.buffer(hw, cap_style=2) if g.length > 0 else Point(g.coords[0]).buffer(hw))
+            else:
+                l, t, r_, b = _bbox(it.GetBoundingBox())
+                pads.append(box(l - 0.1, t - 0.1, r_ + 0.1, b + 0.1))
+    ptree = shapely.STRtree(pads)
+    yards = {fp.GetReference(): box(*_courtyard(fp)) for fp in board.GetFootprints()}
+    names = list(yards)
+    ytree = shapely.STRtree([yards[n] for n in names])
     taken = []
     x0, y0 = copper.OX + 0.4, copper.OY + 0.4
     x1, y1 = copper.OX + copper.BW - 0.4, copper.OY + copper.BH - 0.4
-    fps = sorted(board.GetFootprints(), key=lambda f: -f.GetBoundingBox(False).GetArea())
-    moved = 0
-    for fp in fps:
-        ref = fp.Reference()
-        if not ref.IsVisible():
-            continue
-        txt = fp.GetReference()
-        h = 1.0
-        w = 0.62 * h * len(txt) + 0.3
-        bb = fp.GetCourtyard(pcbnew.F_CrtYd).BBox() if fp.GetCourtyard(pcbnew.F_CrtYd).OutlineCount() else fp.GetBoundingBox(False)
-        cl, ct, cr, cb = (pcbnew.ToMM(bb.GetLeft()), pcbnew.ToMM(bb.GetTop()), pcbnew.ToMM(bb.GetRight()), pcbnew.ToMM(bb.GetBottom()))
-        cx, cy = (cl + cr) / 2, (ct + cb) / 2
-        cands = []
-        if (cr - cl) > w + 1 and (cb - ct) > h + 1:
-            cands.append((cx, cy, 0))                      # inside the body of large parts
-        for d in (0.15, 0.6, 1.2, 2.0, 3.0, 4.0):
+
+    def clear(fp_ref, r, own_inside):
+        if r.bounds[0] < x0 or r.bounds[1] < y0 or r.bounds[2] > x1 or r.bounds[3] > y1:
+            return False
+        if any(r.intersects(pads[k]) for k in ptree.query(r)):
+            return False
+        for k in ytree.query(r):
+            n = names[k]
+            if not r.intersects(yards[n]) or r.touches(yards[n]):
+                continue
+            if n != fp_ref or not (own_inside and r.within(yards[n])):
+                return False
+        return not any(r.distance(t) < LABEL_GAP for t in taken)
+
+    def candidates(l, t, r_, b, w, h):
+        cx, cy = (l + r_) / 2, (t + b) / 2
+        out = []
+        for d in (0.05, 0.3, 0.7, 1.2, 2.0):
             for rot in (0, 90):
                 tw, th = (w, h) if rot == 0 else (h, w)
-                cands += [(cx, ct - th / 2 - d, rot), (cx, cb + th / 2 + d, rot),
-                          (cl - tw / 2 - d, cy, rot), (cr + tw / 2 + d, cy, rot),
-                          (cl - tw / 2 - d, ct - th / 2 - d, rot), (cr + tw / 2 + d, ct - th / 2 - d, rot),
-                          (cl - tw / 2 - d, cb + th / 2 + d, rot), (cr + tw / 2 + d, cb + th / 2 + d, rot)]
-        best = None
-        for (x, y, rot) in cands:
-            tw, th = (w, h) if rot == 0 else (h, w)
-            r = box(x - tw / 2, y - th / 2, x + tw / 2, y + th / 2)
-            if r.bounds[0] < x0 or r.bounds[1] < y0 or r.bounds[2] > x1 or r.bounds[3] > y1:
-                continue
-            if any(r.intersects(pads[k]) for k in tree.query(r)):
-                continue
-            if any(r.intersects(t) for t in taken):
-                continue
-            best = (x, y, rot, r)
-            break
-        if best is None:
-            continue
-        x, y, rot, r = best
+                for f in (0, -0.25, 0.25, -0.5, 0.5):       # slide along each side, centre first
+                    sx, sy = f * (r_ - l + tw), f * (b - t + th)
+                    out += [(cx + sx, t - th / 2 - d, rot), (cx + sx, b + th / 2 + d, rot),
+                            (l - tw / 2 - d, cy + sy, rot), (r_ + tw / 2 + d, cy + sy, rot)]
+        return out
+
+    def size(fp, hgt):
+        ref = fp.Reference()
+        ref.SetTextSize(pcbnew.VECTOR2I(pcbnew.FromMM(hgt), pcbnew.FromMM(hgt)))
+        a = ref.GetTextAngleDegrees()
+        ref.SetTextAngleDegrees(0)
+        l, t, r_, b = _bbox(ref.GetEffectiveTextShape().BBox())
+        ref.SetTextAngleDegrees(a)
+        return r_ - l + 0.1, b - t + 0.1
+
+    def put(fp, x, y, rot, r):
+        ref = fp.Reference()
         ref.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
         ref.SetTextAngleDegrees(rot)
         ref.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
         ref.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
         taken.append(r)
-        moved += 1
-    return moved
+
+    # most constrained first: small parts, which have nowhere else to go
+    fps = sorted(board.GetFootprints(), key=lambda f: yards[f.GetReference()].area)
+    kept, left = 0, []
+    for fp in fps:
+        # glyphs; the placer kept 0.1 mm around them (its courtyard box is the outline's centre line,
+        # KiCad's includes the line width: 0.025 mm more)
+        r = box(*_bbox(fp.Reference().GetEffectiveTextShape().BBox()))
+        if clear(fp.GetReference(), r.buffer(-0.03, join_style=2), own_inside=True):
+            taken.append(r)
+            kept += 1
+        else:
+            left.append(fp)
+    print(f"  references kept where the placer put them: {kept}; to place: {len(left)}", flush=True)
+    placed = kept
+    for stage, hgt in (("next to the part", REF_H), ("inside the part", REF_H), ("0.8 mm", REF_SMALL)):
+        todo, left = left, []
+        for fp in todo:
+            name = fp.GetReference()
+            w, h = size(fp, hgt)
+            l, t, r_, b = _courtyard(fp)
+            best = None
+            if stage == "inside the part":
+                spots = [((l + r_) / 2, (t + b) / 2, rot) for rot in (0, 90)]
+            else:
+                spots = candidates(l, t, r_, b, w, h)
+            for (x, y, rot) in spots:
+                tw, th = (w, h) if rot == 0 else (h, w)
+                rr = box(x - tw / 2, y - th / 2, x + tw / 2, y + th / 2)
+                if clear(name, rr, own_inside=stage == "inside the part"):
+                    best = (x, y, rot, rr)
+                    break
+            if best is None:
+                left.append(fp)
+                continue
+            put(fp, *best)
+            placed += 1
+        print(f"  references {stage}: {placed} placed, {len(left)} left", flush=True)
+    for fp in left:
+        fp.Reference().SetVisible(False)      # better hidden than printed over pads or another part
+        print("  no room for", fp.GetReference(), "(hidden; on F.Fab)")
+
+    # terminal names next to the jacks (the user's texts, which sat off the board)
+    texts = {d.GetText(): d for d in board.GetDrawings() if d.GetClass() == "PCB_TEXT"}
+    edge = box(x0, y0, x1, y1)
+    for name, jack in JACK_LABELS.items():
+        d = texts.get(name)
+        if d is None:
+            continue
+        d.SetLayer(pcbnew.F_SilkS)
+        d.SetMirrored(False)
+        d.SetTextAngleDegrees(0)
+        a = d.GetEffectiveTextShape().BBox()
+        w, h = pcbnew.ToMM(a.GetWidth()) + 0.2, pcbnew.ToMM(a.GetHeight()) + 0.2
+        l, t, r_, b = box(*_courtyard(board.FindFootprintByReference(jack))).intersection(edge).bounds
+        for (x, y, rot) in candidates(l, t, r_, b, w, h):
+            tw, th = (w, h) if rot == 0 else (h, w)
+            rr = box(x - tw / 2, y - th / 2, x + tw / 2, y + th / 2)
+            if clear(jack, rr, own_inside=False):
+                d.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
+                d.SetTextAngleDegrees(rot)
+                d.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+                d.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
+                taken.append(rr)
+                print(f"  {name} next to {jack}")
+                break
+        else:
+            print(f"  no room for {name} next to {jack}")
+    return placed
 
 
 def run(path):
     board = pcbnew.LoadBoard(path)
+    print("thermal vias joined solid:", copper.solid_thermal_vias(board))
     print("pours", pours(board))
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     print("stitching vias", stitch(board))

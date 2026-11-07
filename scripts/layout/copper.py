@@ -15,7 +15,7 @@ from kc import pcbnew
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 
-OX, OY, BW, BH = 40.0, 59.92, 120.0, 80.0
+OX, OY, BW, BH = 30.0, 59.92, 140.0, 80.0
 INSET = 0.5                  # copper to board edge
 USB_GAP = 1.5                # GND <-> GND_USB plane gap
 
@@ -25,17 +25,17 @@ CM = "/Current measurement & auto-ranging/"
 POURS = {
     "Net-(D101-A2)":            (("F.Cu", "B.Cu"), 5.0, ["J101.1", "F102.1", "F101.1", "D101.2"], 5),
     # down the outer side of R501 pad 1, so the gap between the shunt pads stays free for the Kelvin taps
-    "VIN_PT":                   (("F.Cu", "B.Cu"), 4.5, ["F102.2", "@21.0,7.6", "R501.1"], 5),
+    "VIN_PT":                   (("F.Cu", "B.Cu"), 4.5, ["F102.2", "@31.0,7.6", "R501.1"], 5),
     "Net-(U501-IN-)":           (("F.Cu", "B.Cu"), 5.0, ["R501.2", "K501.14"], 5),
     # relay common to the output switch through the channel between the relay's two pin rows
-    PT + "SW_IN":               (("F.Cu", "B.Cu"), 4.0, ["K501.11", "@65.7,7.35", "@88.5,7.35", "Q502.5"], 5),
+    PT + "SW_IN":               (("F.Cu", "B.Cu"), 4.0, ["K501.11", "@75.7,7.35", "@98.5,7.35", "@108.5,7.35", "Q502.5"], 5),
     PT + "SRC_COM":             (("F.Cu",), 3.0, ["Q502.1", "Q502.3", "Q503.1", "Q503.3"], 5),
     PT + "OUT_P":               (("F.Cu", "B.Cu"), 5.0, ["Q503.5", "J501.1", "D502.2"], 5),
     "Net-(Q101-D)":             (("F.Cu",), 3.0, ["F101.2", "Q101.2"], 5),
     "VIN_PROT":                 (("F.Cu",), 2.5, ["Q101.3", "C101.1", "C202.1", "C201.1"], 4),
     "VPRE":                     (("F.Cu",), 2.5, ["L201.2", "C211.1"], 4),
     # R301 pad 1 gets its current from Q301's source through In2 (via array at the pad's outer side)
-    "Net-(D304-K)":             (("F.Cu",), 3.5, ["R301.1", "@42.4,16.5"], 5),
+    "Net-(D304-K)":             (("F.Cu",), 3.5, ["R301.1", "@52.4,16.5"], 5),
     "VFORCE":                   (("F.Cu",), 2.0, ["R301.2", "R401.1", "Q401.3", "D401.1"], 4),
     CM + "N_MID":               (("F.Cu",), 2.0, ["R401.2", "R402.1", "Q401.2", "Q402.3", "D401.3", "D402.1"], 4),
     "VSENSE":                   (("F.Cu",), 2.0, ["R402.2", "Q402.2", "D402.3", "K501.12"], 4),
@@ -46,7 +46,7 @@ IN2 = {
     "VIN_PROT": (4.0, ["Q101.3", "C101.1", "U201.20", "U101.4"], 3),
     "VPRE":     (4.0, ["L201.2", "C211.1", "Q301.2"], 3),
     # Q301 source to the CC shunt crosses under the 10 A band on In2, beside VPRE
-    "Net-(D304-K)": (3.5, ["Q301.3", "@45.9,10.0", "@42.6,13.3", "@42.6,16.5", "R301.1"], 4),
+    "Net-(D304-K)": (3.5, ["Q301.3", "@55.9,10.0", "@52.6,13.3", "@52.6,16.5", "R301.1"], 4),
 }
 # Kelvin windows: no pour between a shunt's pads and in a strip across the current path, so the sense
 # traces reach the inner pad edges without touching the power copper
@@ -54,7 +54,7 @@ SHUNTS = []          # not needed with flat-ended corridors that stop at the pad
 KELVIN_SHUNTS = {"R501", "R301", "R401", "R402"}
 # signal crossings through the 10 A band: gaps in its B.Cu copy (F.Cu carries the full current there)
 # Q301's gate pin sits above the band at the top edge; the gate drive reaches it on B.Cu through this gap
-B_CROSSINGS = [box(33.2, 4.6, 36.8, 15.5)]
+B_CROSSINGS = [box(43.2, 4.6, 46.8, 15.5)]
 
 # via arrays joining the layers of a power path at its SMD ends (about 1 A per 0.3 mm via)
 # (net, anchor pad, count): vias go where every layer of the net's copper overlaps, nearest the anchor first
@@ -258,10 +258,24 @@ def via_arrays(board, d=0.6, drill=0.3, pitch=1.0):
     return made
 
 
+def solid_thermal_vias(board):
+    """Exposed-pad thermal vias (plated holes sharing an SMD pad's number) join every plane solid:
+    thermal spokes on 0.65 mm pads would starve them (KiCad starved_thermal) and add thermal resistance."""
+    n = 0
+    for fp in board.GetFootprints():
+        smd = {p.GetNumber() for p in fp.Pads() if p.GetAttribute() == pcbnew.PAD_ATTRIB_SMD and p.GetNumber()}
+        for p in fp.Pads():
+            if p.GetAttribute() == pcbnew.PAD_ATTRIB_PTH and p.GetNumber() in smd and pcbnew.ToMM(p.GetDrillSizeX()) <= 0.5:
+                p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_FULL)
+                n += 1
+    return n
+
+
 def run(path):
     board = pcbnew.LoadBoard(path)
     for z in list(board.Zones()):
         board.Remove(z)
+    print("thermal vias joined solid:", solid_thermal_vias(board))
     edge = box(INSET, INSET, BW - INSET, BH - INSET)
     usb = unary_union([pad_shape(p, 0.8) for r in USB_SIDE for p in board.FindFootprintByReference(r).Pads()])
     # USB side of the isolator: its bottom pin row joins the island

@@ -7,10 +7,10 @@ Run them with KiCad 10's Python (`kicad10-python` here; any Python that can `imp
 | Step | Script | What it does |
 |---|---|---|
 | 1 | `widen.py board L R` | Moves the left/right edges out by L/R mm, with the jacks and mounting holes tied to them |
-| 2 | `place.py board` | Hand anchors for the power parts + region-based placer for the rest; locked parts never move |
+| 2 | `place.py board` | Hand anchors for the power parts + region-based placer for the rest, each part with room for its reference; locked parts never move |
 | 3 | `copper.py board` | In1 GND plane with the isolated GND_USB island, In2 +3V3 plane with VIN_PROT / VPRE / Q301-source corridors, outer-layer pours along the 10 A and 5 A paths |
 | 4 | `octoroute.py board --out routed` | Octilinear grid router: Kelvin sense traces first, plane fan-out, then every other connection pad to pad |
-| 5 | `finish.py board` | GND pours on F.Cu/B.Cu, stitching vias, references placed clear of pads |
+| 5 | `finish.py board` | GND pours on F.Cu/B.Cu, stitching vias, references shown (values hidden) and kept clear of pads and other parts |
 | 6 | `pcb_rules.py check board` | DRC + shorts/clearance + fab floor + geometry gates |
 
 `render.py board out.png "F.Cu,Edge.Cuts"` renders layers for review; `dump.py` writes footprint geometry to JSON.
@@ -26,5 +26,7 @@ Run them with KiCad 10's Python (`kicad10-python` here; any Python that can `imp
 
 ## Known limits
 
-- Single pass with re-ordering instead of rip-up: nets that fail are routed first in the next run (`--first`).
+- Rip-up and reroute is transactional: the router's own tracks in the way of a failed connection are ripped,
+  and the change is kept only if the failed connection and every ripped one route again. Nets still open
+  can be put first in another run (`--first`).
 - Differential pairs (USB) are routed as two single nets; at full speed (12 Mbit/s) the mismatch is irrelevant.

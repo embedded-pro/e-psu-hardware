@@ -692,6 +692,7 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
         res = attempt(k)
         if res is None:
             failed.append(k)
+            print("  first-pass fail", jobs[k][2], jobs[k][3]["pads"], jobs[k][4]["pads"] if jobs[k][4] else "plane", flush=True)
             continue
         made[k] = r.commit(jobs[k][2], res[0], res[1])[0]
         if k % 50 == 0:
@@ -699,7 +700,7 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
     print("first pass failed", len(failed), flush=True)
 
     # rip-up and reroute: search through the router's own tracks at a cost, rip the connections in the way,
-    # route the failed one, then route the ripped ones again
+    # route the failed one, then route the ripped ones again; undone unless all of them route
     owner_of = {}
     for k, items in made.items():
         for it in items:
@@ -708,7 +709,7 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
     for it_ in range(4):
         if not failed:
             break
-        nxt = []
+        nxt, fixed_ = [], 0
         for k in failed:
             res = attempt(k, soft=True)
             if res is None:
@@ -730,30 +731,52 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
                 if g.distance(line) < 0.7 and u in owner_of:
                     victims.add(owner_of[u])
             victims = {v for v in victims if ripcount[v] < 3}
-            for v in victims:
+            if not victims:
+                nxt.append(k)
+                continue
+            # transactional: keep the rip-up only if the failed connection and every ripped one route again
+            saved = {v: made.pop(v, []) for v in victims}
+            for v, items in saved.items():
                 ripcount[v] += 1
-                for itm in made.pop(v, []):
+                for itm in items:
                     r.dyn_uuids.discard(itm.m_Uuid.AsString())
                     r.b.Remove(itm)
             r.build(r.keepouts)
             masks.clear()
+            new = {}
             res = attempt(k)
-            if res is None:
-                nxt.append(k)
+            ok = res is not None
+            if ok:
+                new[k] = r.commit(net, res[0], res[1])[0]
+                for v in sorted(victims, key=lambda v: jobs[v][0]):
+                    rv = attempt(v)
+                    if rv is None:
+                        ok = False
+                        break
+                    new[v] = r.commit(jobs[v][2], rv[0], rv[1])[0]
+            if ok:
+                for kk, items in new.items():
+                    made[kk] = items
+                    for itm in items:
+                        owner_of[itm.m_Uuid.AsString()] = kk
+                fixed_ += 1
             else:
-                made[k] = r.commit(net, res[0], res[1])[0]
-                for itm in made[k]:
-                    owner_of[itm.m_Uuid.AsString()] = k
-            for v in sorted(victims, key=lambda v: jobs[v][0]):
-                res = attempt(v)
-                if res is None:
-                    nxt.append(v)
-                else:
-                    made[v] = r.commit(jobs[v][2], res[0], res[1])[0]
-                    for itm in made[v]:
-                        owner_of[itm.m_Uuid.AsString()] = v
+                for items in new.values():
+                    for itm in items:
+                        r.dyn_uuids.discard(itm.m_Uuid.AsString())
+                        r.b.Remove(itm)
+                for v, items in saved.items():
+                    for itm in items:
+                        r.b.Add(itm)
+                        r.dyn_uuids.add(itm.m_Uuid.AsString())
+                    made[v] = items
+                r.build(r.keepouts)
+                masks.clear()
+                nxt.append(k)
         failed = nxt
-        print("rip-up round", it_ + 1, "failed", len(failed), flush=True)
+        print("rip-up round", it_ + 1, "fixed", fixed_, "still failed", len(failed), flush=True)
+        if not fixed_:
+            break
     failed = [(jobs[k][2], jobs[k][3]["pads"], jobs[k][4]["pads"] if jobs[k][4] else "plane") for k in failed]
     add_fill_keepouts(board, ktracks)
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())

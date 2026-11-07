@@ -14,7 +14,7 @@ mkdir -p "$W"
 git -C "$REPO" show "$BASE:hardware/e-psu/e-psu.kicad_pcb" > "$W/e-psu.kicad_pcb"
 cp "$REPO"/hardware/e-psu/e-psu.kicad_{pro,dru} "$REPO"/hardware/e-psu/*.kicad_sch "$W/"
 cd "$HERE"
-$PY widen.py "$W/e-psu.kicad_pcb" 10 10
+$PY widen.py "$W/e-psu.kicad_pcb" 20 20
 $PY place.py "$W/e-psu.kicad_pcb"
 $PY copper.py "$W/e-psu.kicad_pcb"
 $PY octoroute.py "$W/e-psu.kicad_pcb"

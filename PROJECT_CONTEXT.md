@@ -89,7 +89,8 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
 
 ## PCB (rev B, `hardware/e-psu/e-psu.kicad_pcb`, `scripts/layout/`, KiCad 10)
 
-- **Board:** 120 × 80 mm (widened 10 mm each side from the user's 100 × 80 outline), 4 layers:
+- **Board:** 140 × 80 mm (widened 20 mm each side from the user's 100 × 80 outline; MCU and USB-C stay
+  centred), 4 layers:
   F signals and pours / In1 GND plane / In2 +3V3 plane with power corridors / B signals and pours.
   JLCPCB or Seeed standard process; specify 1 oz inner copper.
 - **Rules:** `pcb_rules.py apply --fab jlcpcb,seeed --netclasses` (pcb-design-rules skill): strictest of both
@@ -101,12 +102,15 @@ USB-C, USBLC6 ESD protection and an ADuM3160 isolator.
     FETs (Q502/Q503) in the top-right corner → J501.
   - Ranging chain as two compact shunt columns (R401/Q401/D401, R402/Q402/D402) between R301 and K501 pin 12.
   - Buck: U201 with its input caps against the VIN/PGND pins, L201 below, VPRE caps around L201's output.
+  - Output TVS D502 between the switch and J501. Parts are kept off the fuse-to-shunt, 10 A and relay-to-switch copper.
+  - Every part gets room for its reference (1.0 mm / 0.15 mm, values hidden); `finish.py` keeps those spots.
 - **Power copper (`copper.py`):** pours along each power path (10 A band on F.Cu and B.Cu, 5 A paths on F.Cu),
   In2 corridors for VIN_PROT, VPRE and Q301's source, via arrays (about 1 A per via) at every SMD end,
   GND_USB island under the USB side of the ADuM3160.
 - **Routing (`octoroute.py`):** own octilinear grid router that meets the gates by construction (45° bends only,
   no jogs, tracks start and end on pads/pours/plane vias, no mid-track branches). Kelvin sense traces from the
   inner pad halves of R501, R301, R401 and R402 are routed first and protected by no-fill strips.
+  Failed connections get a transactional rip-up and reroute (kept only if everything ripped routes again).
   Freerouting 2.1 could not route this board (about 200 connections open after four passes).
 - **Rebuild:** `scripts/layout/build.sh <placement-commit>`; review with `review.py`, check with `pcb_rules.py check`.
 

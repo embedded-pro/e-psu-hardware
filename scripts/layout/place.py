@@ -1,4 +1,4 @@
-"""Placement for the rev B outline (120 x 80 mm), KiCad 10.
+"""Placement for the rev B outline (140 x 80 mm), KiCad 10.
 
 Run with KiCad 10's Python:  kicad10-python place.py <board.kicad_pcb>
 
@@ -13,59 +13,64 @@ import sys
 
 from kc import pcbnew
 
-OX, OY = 40.0, 59.92          # board top-left on the KiCad page
-BW, BH = 120.0, 80.0
+OX, OY = 30.0, 59.92          # board top-left on the KiCad page
+BW, BH = 140.0, 80.0
 GRID = 0.25
 GAP = 0.45                    # min gap between courtyards of auto-placed parts (routing channel)
 EDGE = 0.6                    # courtyard to board edge
+REF_H = 1.0                   # reference text height (JLCPCB minimum), stroke 0.15
+LABEL_EDGE = 0.4              # reference text to board edge
+LABEL_GAP = 0.3               # between two references, so they read as separate words
 
 # ref: (x, y, rot) of the footprint origin, local mm
 ANCHORS = {
     # top band: 15 A fuse at the input jack, pass element with its tab at the top edge (heatsink above
     # the board), then the relay that joins the pass-through and precision paths
     "F102": (12.2, 2.6, 0),
-    "Q301": (35.0, 2.85, 0),
-    "K501": (86.0, 3.6, 180),
+    "Q301": (45.0, 2.85, 0),
+    "K501": (96.0, 3.6, 180),
     # pass-through shunt right under the fuse; the 10 A band runs below Q301 to K501 pin 14
-    "R501": (25.5, 10.5, 0),
+    "R501": (35.5, 10.5, 0),
     # precision path: fuse, reverse-polarity P-FET, TVS, bulk cap, under the input jack
     "F101": (8.5, 24.5, 180),
     "D101": (17.0, 24.6, 0),
     "Q101": (11.0, 31.5, 180),
     "C101": (10.6, 41.5, 180),
     # tracking buck: VIN/PGND on the left (input caps), SW at the bottom into L201, control pins face the MCU
-    "U201": (36.0, 30.4, 90),
-    "C201": (31.7, 28.6, 90),        # input caps against the VIN/PGND pin column: smallest hot loop
-    "C202": (28.4, 28.6, 90),
-    "L201": (36.0, 42.0, 270),       # SW pad up against U201's SW pins, VPRE pad down
-    "C211": (32.0, 54.3, 0),
+    "U201": (46.0, 30.4, 90),
+    "C201": (41.7, 28.6, 90),        # input caps against the VIN/PGND pin column: smallest hot loop
+    "C202": (38.4, 28.6, 90),
+    "L201": (46.0, 42.0, 270),       # SW pad up against U201's SW pins, VPRE pad down
+    "C211": (42.0, 54.3, 0),
     # 15 mOhm CC shunt at the head of the ranging chain, then two compact shunt columns:
     # shunt / bypass FET / clamp diodes, VFORCE -> N_MID -> VSENSE -> K501 pin 12
-    "R301": (50.0, 16.5, 0),
-    "U301": (50.0, 21.0, 0),          # INA293 under R301, pin 3 under pad 1 and pin 4 under pad 2 (Kelvin)
+    "R301": (60.0, 16.5, 0),
+    "U301": (60.0, 21.0, 0),          # INA293 under R301, pin 3 under pad 1 and pin 4 under pad 2 (Kelvin)
     # back-to-back output switch in the top-right corner: relay common -> Q502 drain | sources | Q503 drain -> J501
-    "Q502": (93.0, 4.5, 180), "Q503": (101.0, 4.5, 0),
-    "R401": (58.0, 17.5, 0), "Q401": (58.0, 21.0, 180), "D401": (58.0, 24.7, 0),
-    "R402": (64.0, 17.5, 0), "Q402": (64.0, 21.0, 180), "D402": (64.0, 24.7, 0),
+    "Q502": (113.0, 4.5, 180), "Q503": (121.0, 4.5, 0),
+    "D502": (114.0, 11.0, 0),         # output TVS under the switch, cathode towards J501 pin 1
+    "R401": (68.0, 17.5, 0), "Q401": (68.0, 21.0, 180), "D401": (68.0, 24.7, 0),
+    "R402": (74.0, 17.5, 0), "Q402": (74.0, 21.0, 180), "D402": (74.0, 24.7, 0),
 }
 
 # placement keep-outs (x0, y0, x1, y1): the 10 A pass-through band from R501 to K501 pin 14 on F.Cu
-KEEPOUTS = [(28.0, 7.4, 62.0, 13.8)]
+# the fuse-to-shunt pour (VIN_PT) beside it, and the relay common (SW_IN) band from K501 to Q502's drain tab
+KEEPOUTS = [(38.0, 7.4, 72.0, 13.8), (24.0, 1.0, 34.8, 12.8), (98.8, 5.0, 109.5, 9.7)]
 
 # block regions (x0, y0, x1, y1), local mm. Several rectangles per block are allowed.
 REGIONS = {
     "inp":   [(0.6, 21.9, 20.9, 36.0), (0.6, 36.0, 20.9, 47.2)],
-    "hk":    [(0.6, 47.2, 20.9, 58.1), (20.9, 58.9, 51.0, 79.4)],
-    "buck":  [(21.0, 26.5, 52.4, 58.9)],
-    "lin":   [(21.0, 13.8, 58.4, 26.5), (21.0, 7.9, 28.0, 13.8)],
-    "chain": [(53.0, 14.6, 89.3, 24.5)],
-    "rsense": [(66.5, 14.6, 89.3, 24.5), (53.0, 14.6, 89.3, 27.0), (72.4, 24.5, 92.0, 30.0)],
-    "out":   [(89.3, 0.6, 112.0, 8.4), (89.3, 8.4, 99.3, 24.0), (99.3, 21.9, 119.4, 36.0)],
-    "iso":   [(72.4, 24.5, 92.0, 46.0)],
-    "amp":   [(92.0, 24.5, 119.4, 58.1), (72.4, 46.0, 92.0, 58.1)],
-    "mcu":   [(52.4, 24.5, 72.4, 49.0)],
-    "usbm":  [(50.0, 44.0, 72.0, 64.0)],
-    "ui":    [(66.6, 58.9, 99.3, 79.4)],
+    "hk":    [(0.6, 47.2, 20.9, 58.1), (20.9, 58.9, 61.0, 79.4)],
+    "buck":  [(21.0, 26.5, 62.4, 58.9)],
+    "lin":   [(21.0, 13.8, 68.4, 26.5), (21.0, 7.9, 38.0, 13.8)],
+    "chain": [(63.0, 14.6, 109.3, 24.5)],
+    "rsense": [(76.5, 14.6, 109.3, 24.5), (63.0, 14.6, 109.3, 27.0), (82.4, 24.5, 112.0, 30.0)],
+    "out":   [(99.3, 0.6, 132.0, 8.4), (109.3, 8.4, 119.3, 24.0), (119.3, 21.9, 139.4, 36.0)],
+    "iso":   [(82.4, 24.5, 112.0, 46.0)],
+    "amp":   [(112.0, 24.5, 139.4, 58.1), (82.4, 46.0, 112.0, 58.1)],
+    "mcu":   [(62.4, 24.5, 82.4, 49.0)],
+    "usbm":  [(60.0, 44.0, 82.0, 64.0)],
+    "ui":    [(76.6, 58.9, 119.3, 79.4)],
 }
 AMP_ICS = {"U302", "U303", "U304"}
 
@@ -136,9 +141,48 @@ def inside(r, reg):
     return r[0] >= reg[0] and r[1] >= reg[1] and r[2] <= reg[2] and r[3] <= reg[3]
 
 
+def label_size(f):
+    """(w, h) of the reference at REF_H, unrotated."""
+    ref = f.Reference()
+    ref.SetVisible(True)
+    f.Value().SetVisible(False)
+    ref.SetTextSize(pcbnew.VECTOR2I(pcbnew.FromMM(REF_H), pcbnew.FromMM(REF_H)))
+    ref.SetTextThickness(pcbnew.FromMM(0.15))
+    ref.SetTextAngleDegrees(0)
+    bb = ref.GetEffectiveTextShape().BBox()       # the glyphs; GetBoundingBox() adds line spacing
+    return pcbnew.ToMM(bb.GetWidth()) + 0.2, pcbnew.ToMM(bb.GetHeight()) + 0.2
+
+
+def label_spots(r, w, h):
+    """Reference positions around courtyard r, best first: centred above/below, then left/right
+    (rotated), then slid along the sides. Each is (x0, y0, x1, y1, rot)."""
+    out = []
+    cx, cy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
+    for d in (0.0, 0.25):
+        for f in (0.0, -0.3, 0.3):
+            sx = f * (r[2] - r[0] + w)
+            out.append((cx + sx - w / 2, r[1] - d - h, cx + sx + w / 2, r[1] - d, 0))
+            out.append((cx + sx - w / 2, r[3] + d, cx + sx + w / 2, r[3] + d + h, 0))
+            sy = f * (r[3] - r[1] + w)
+            out.append((r[0] - d - h, cy + sy - w / 2, r[0] - d, cy + sy + w / 2, 90))
+            out.append((r[2] + d, cy + sy - w / 2, r[2] + d + h, cy + sy + w / 2, 90))
+    return out
+
+
+def set_label(f, spot):
+    x0, y0, x1, y1, rot = spot
+    ref = f.Reference()
+    ref.SetTextAngleDegrees(rot)
+    ref.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+    ref.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
+    ref.SetPosition(to_abs((x0 + x1) / 2, (y0 + y1) / 2))
+
+
 def run(path):
     board = pcbnew.LoadBoard(path)
     fps = {f.GetReference(): f for f in board.GetFootprints()}
+    lsize = {ref: label_size(f) for ref, f in fps.items()}
+    labels = {}                   # ref -> reserved reference rectangle (x0, y0, x1, y1, rot)
     nets = {}
     for ref, f in fps.items():
         for p in f.Pads():
@@ -177,9 +221,29 @@ def run(path):
         x, y = pcbnew.ToMM(f.GetPosition().x) - OX, pcbnew.ToMM(f.GetPosition().y) - OY
         if ref not in placed and 0 < x < BW and 0 < y < BH:
             placed[ref] = crtyd(f)
+    def find_label(ref, r, extra=None):
+        """First reference spot around r clear of every courtyard, reserved label and the board edge."""
+        w, h = lsize[ref]
+        for sp in label_spots(r, w, h):
+            if sp[0] < LABEL_EDGE or sp[1] < LABEL_EDGE or sp[2] > BW - LABEL_EDGE or sp[3] > BH - LABEL_EDGE:
+                continue
+            if extra is not None and overlap(sp, extra, 0.0):
+                continue
+            if any(overlap(sp, o, 0.0) for k, o in placed.items() if not k.startswith("__")):
+                continue
+            if any(overlap(sp, o, LABEL_GAP) for o in labels.values()):
+                continue
+            return sp
+        return None
+
+    # labels for the fixed parts first, so the auto-placed ones leave room for them
+    for ref in sorted(placed, key=lambda k: (placed[k][2] - placed[k][0]) * (placed[k][3] - placed[k][1])):
+        sp = find_label(ref, placed[ref])
+        if sp is not None:
+            labels[ref] = sp
     for i, k in enumerate(KEEPOUTS):
         placed[f"__keepout{i}"] = k
-    print("fixed:", len(placed))
+    print("fixed:", len(placed), "labels", len(labels))
 
     def targets(ref):
         """pad number -> list of (x, y) of placed pads on the same small net."""
@@ -244,6 +308,7 @@ def run(path):
             cx, cy = (regs[0][0] + regs[0][2]) / 2, (regs[0][1] + regs[0][3]) / 2
         shapes = {rot: shape(ref, rot) for rot in (0, 90, 180, 270)}
         best = None
+        n_geo = n_lab = 0
         for reg in regs + [None]:
             if reg is None:
                 if best is not None:
@@ -263,28 +328,40 @@ def run(path):
                             continue
                         if any(overlap(r, o, GAP) for o in placed.values()):
                             continue
+                        if any(overlap(r, o, 0.0) for o in labels.values()):
+                            continue
                         cost = 0.0
                         for num, px, py in pads:
                             pts = tg.get(num)
                             if pts:
                                 cost += min(math.hypot(px + x - a, py + y - b) for a, b in pts)
                         cost += 0.05 * math.hypot(x - cx, y - cy) + (0.3 if rot in (180, 270) else 0.0)
+                        n_geo += 1
                         if best is None or cost < best[0]:
-                            best = (cost, x, y, rot, r)
+                            sp = find_label(ref, r)      # only parts that keep room for their reference
+                            if sp is None:
+                                n_lab += 1
+                                continue
+                            best = (cost, x, y, rot, r, sp)
                         found += 1
                 if found >= 16 and ring > 3:
                     break
         if best is None:
+            print(f"  {ref}: {n_geo} free spots, {n_lab} without room for the reference, target {cx:.1f},{cy:.1f}")
             unplaced.append(ref)
             f.SetOrientationDegrees(0)
             f.SetPosition(to_abs(BW + 20, 0))
             continue
-        _, x, y, rot, r = best
+        _, x, y, rot, r, sp = best
         f.SetOrientationDegrees(rot)
         f.SetPosition(to_abs(x, y))
         placed[ref] = r
+        labels[ref] = sp
     if unplaced:
         print("UNPLACED:", unplaced)
+    for ref, sp in labels.items():
+        set_label(fps[ref], sp)
+    print("labels reserved", len(labels), "of", len(fps))
     pcbnew.SaveBoard(path, board)
     return unplaced
 
