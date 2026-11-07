@@ -60,7 +60,8 @@ ANCHORS = {
 
 # placement keep-outs (x0, y0, x1, y1): the 10 A pass-through band from R501 to K501 pin 14 on F.Cu
 # the fuse-to-shunt pour (VIN_PT) beside it, and the relay common (SW_IN) band from K501 to Q502's drain tab
-KEEPOUTS = [(38.0, 7.4, 72.0, 13.8), (24.0, 1.0, 34.8, 12.8), (98.8, 5.0, 109.5, 9.7)]
+# and the strip above that band, which the band cuts off on both outer layers
+KEEPOUTS = [(38.0, 7.4, 72.0, 13.8), (24.0, 1.0, 34.8, 12.8), (98.8, 5.0, 109.5, 9.7), (98.8, 0.0, 112.0, 5.4)]
 
 # block regions (x0, y0, x1, y1), local mm. Several rectangles per block are allowed.
 REGIONS = {
@@ -70,7 +71,9 @@ REGIONS = {
     "lin":   [(21.0, 13.8, 68.4, 26.5), (21.0, 7.9, 38.0, 13.8)],
     "chain": [(63.0, 14.6, 109.3, 24.5)],
     "rsense": [(76.5, 14.6, 109.3, 24.5), (63.0, 14.6, 109.3, 27.0), (84.0, 24.5, 112.0, 30.0)],
-    "out":   [(99.3, 0.6, 132.0, 8.4), (109.3, 8.4, 119.3, 24.0), (119.3, 21.9, 139.4, 36.0)],
+    # nothing in the strip between the relay-to-switch band and the top edge: the band cuts it off on both
+    # outer layers
+    "out":   [(99.3, 10.0, 119.3, 24.0), (119.3, 21.9, 139.4, 36.0)],
     # CV/CC error amps and DAC between the pass element's gate drive (lin), the CC shunt amplifier (U301)
     # and the ranging chain: the analog loop stays compact. The MCU moves right, next to the user interface.
     "amp":   [(62.4, 24.5, 84.0, 49.0)],

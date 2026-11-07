@@ -40,6 +40,7 @@ PREF = {0: (0, 4), 1: (2, 6)}   # preferred directions per layer index: F horizo
 CLASS = {"Default": (0.2, 0.15), "Power": (0.3, 0.15), "HighCurrent": (0.3, 0.2), "USB": (0.2, 0.15)}
 PLANES = {"GND": "In1.Cu", "GND_USB": "In1.Cu", "+3V3": "In2.Cu"}
 DENSE_FIRST = ("U601", "U201")    # LQFP-64 and WQFN-30: their pins need the space next to them
+ESCAPES = (8, 4)                  # cells straight out from a fine-pitch pin's outer end (tried in turn)
 FREE, BLOCK = -1, -2
 
 
@@ -243,7 +244,8 @@ class Router:
         return list(zip((ii + i0).tolist(), (jj + j0).tolist()))
 
     # ---------------------------------------------------------------- search
-    def route(self, net, starts, goals, plane_goal=None, margin=6.0, max_exp=400000, avoid=None, soft=False, weight=HW):
+    def route(self, net, starts, goals, plane_goal=None, margin=6.0, max_exp=400000, avoid=None, soft=False, weight=HW,
+              escape=None, esc_len=8):
         """starts/goals: sets of (layer, i, j). plane_goal: array mask [H, W] where a via reaches the net's plane.
         Returns list of (layer, i, j) cells and the via cells, or None."""
         arr, w, c = self.grid_for(net)
@@ -300,7 +302,17 @@ class Router:
         parent = {}
         heap = []
         cnt = 0
-        for (l, i, j) in starts:
+        if escape:
+            # fine-pitch pin: leave straight out of the package for ESCAPE cells before any turn or via,
+            # so the escape never runs along the pin row and blocks the neighbours
+            for (l, i, j, d) in escape:
+                if not ok(l, i, j):
+                    continue
+                s = (l, i, j, d, K - esc_len)
+                best[s] = 0.0
+                parent[s] = None
+                heapq.heappush(heap, (h(i, j), cnt, 0.0, s)); cnt += 1
+        for (l, i, j) in ([] if escape else starts):
             if not ok(l, i, j):
                 continue
             for d in range(8):
@@ -639,6 +651,27 @@ def plan(r, net_re, skip_re, skip_pads=()):
     return jobs
 
 
+def escape_starts(r, isl):
+    """Start states for an island that is a single fine-pitch IC pin: the pad's outer end, pointing outward."""
+    if len(isl["pads"]) != 1:
+        return None
+    ref = isl["pads"][0].split(".")[0]
+    if ref not in DENSE_FIRST:
+        return None
+    p, n, g, ls = find_pad(r, isl["pads"][0])
+    c = r.b.FindFootprintByReference(ref).GetPosition()
+    dx, dy = g.centroid.x - mm(c.x), g.centroid.y - mm(c.y)
+    if abs(dx) < 1.0 and abs(dy) < 1.0:
+        return None                                   # exposed pad
+    d = (0 if dx > 0 else 4) if abs(dx) >= abs(dy) else (2 if dy > 0 else 6)
+    cells = r.cells_in(g, shrink=0.05)
+    if not cells:
+        return None
+    key = {0: lambda c_: c_[0], 4: lambda c_: -c_[0], 2: lambda c_: c_[1], 6: lambda c_: -c_[1]}[d]
+    far = max(key(c_) for c_ in cells)
+    return [(l, i, j, d) for l in ls if l in (0, 1) for (i, j) in cells if key((i, j)) >= far - 1]
+
+
 def attempt_job(r, job, masks, soft=False, big=False):
     """Route one planned job; returns (cells, plane via) or None. big: one more, wider and greedier search."""
     d, kind, net, a, b = job
@@ -669,6 +702,11 @@ def attempt_job(r, job, masks, soft=False, big=False):
                 if res is not None:
                     break
         return res
+    # start from the fine-pitch pin, so its escape is the controlled end
+    if escape_starts(r, a) is None and escape_starts(r, b) is not None and b["pads"]:
+        a, b = b, a
+        starts = cells_of(r, a)
+    esc = escape_starts(r, a)
     goals = cells_of(r, b)
     if not goals and not any(l in (2, 3) for it in b["items"] for l in it["geo"]):
         return None
@@ -679,15 +717,19 @@ def attempt_job(r, job, masks, soft=False, big=False):
         if not m.is_empty:
             X, Y = np.meshgrid(r.xs, r.ys)
             pg = shapely.contains_xy(m, X, Y)
-    res = r.route(net, starts, goals, plane_goal=pg, margin=6.0, soft=soft)
-    if res is None:
-        res = r.route(net, starts, goals, plane_goal=pg, margin=20.0, max_exp=1500000, soft=soft)
-    if res is None:
-        # long connections run out of search before they run out of room: a greedier search finds them
-        res = r.route(net, starts, goals, plane_goal=pg, margin=30.0, max_exp=1500000, soft=soft, weight=2.0)
-    if res is None and big:
-        res = r.route(net, starts, goals, plane_goal=pg, margin=35.0, max_exp=3000000, soft=soft, weight=2.0)
-    return res
+    for e, el in ([(esc, n) for n in ESCAPES] + [(None, 0)] if esc else [(None, 0)]):
+        kw = dict(soft=soft, escape=e, esc_len=el)
+        res = r.route(net, starts, goals, plane_goal=pg, margin=6.0, **kw)
+        if res is None:
+            res = r.route(net, starts, goals, plane_goal=pg, margin=20.0, max_exp=1500000, **kw)
+        if res is None:
+            # long connections run out of search before they run out of room: a greedier search finds them
+            res = r.route(net, starts, goals, plane_goal=pg, margin=30.0, max_exp=1500000, weight=2.0, **kw)
+        if res is None and big:
+            res = r.route(net, starts, goals, plane_goal=pg, margin=35.0, max_exp=3000000, weight=2.0, **kw)
+        if res is not None:
+            return res
+    return None
 
 
 def chain(r, t0):
@@ -842,10 +884,10 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
     kdone, ktracks = kelvin(r) if net_re == ".*" else (set(), [])
     print("kelvin", len(kdone), "of", len(KELVIN), flush=True)
     jobs = plan(r, net_re, skip_re, kdone)
-    # the fine-pitch ICs' pins escape first, while the space around them is free; then plane fan-out
-    # (short stubs next to the pads); then the rest, shortest first. --first nets go before all of them.
+    # plane fan-out first (short stubs next to the pads); then the fine-pitch ICs' pins, while the space
+    # around them is free; then the rest, shortest first. --first nets go before all of them.
     dense = {n for p, ref, n, nid, g, ls in r.pads if ref in DENSE_FIRST and n and n not in PLANES}
-    jobs.sort(key=lambda j: (j[2] not in first, j[2] not in dense, j[1] != "plane", j[0]))
+    jobs.sort(key=lambda j: (j[2] not in first, j[1] != "plane", j[2] not in dense, j[0]))
     print("fine-pitch nets first:", len(dense), flush=True)
     print("jobs", len(jobs), "planes", sum(j[1] == "plane" for j in jobs), flush=True)
     masks = {}

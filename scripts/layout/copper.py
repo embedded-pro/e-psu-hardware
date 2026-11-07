@@ -51,7 +51,7 @@ IN2 = {
     # the relay's pins are doubled; the 10 A band separates the two VSENSE pins and cuts the coil's +5V pin
     # off from the board on both outer layers, so they meet below it on In2
     "VSENSE": (1.5, ["@80.7,3.6", "@80.7,11.1"], 4),
-    "+5V":    (1.5, ["@96.0,3.6", "@99.2,6.8", "@99.2,15.5"], 4),
+    "+5V":    (2.0, ["@96.0,3.6", "@99.2,6.8", "@99.2,18.0"], 4),
 }
 # Kelvin windows: no pour between a shunt's pads and in a strip across the current path, so the sense
 # traces reach the inner pad edges without touching the power copper
