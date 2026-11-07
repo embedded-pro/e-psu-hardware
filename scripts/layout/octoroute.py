@@ -240,7 +240,7 @@ class Router:
         return list(zip((ii + i0).tolist(), (jj + j0).tolist()))
 
     # ---------------------------------------------------------------- search
-    def route(self, net, starts, goals, plane_goal=None, margin=6.0, max_exp=400000, avoid=None, soft=False):
+    def route(self, net, starts, goals, plane_goal=None, margin=6.0, max_exp=400000, avoid=None, soft=False, weight=HW):
         """starts/goals: sets of (layer, i, j). plane_goal: array mask [H, W] where a via reaches the net's plane.
         Returns list of (layer, i, j) cells and the via cells, or None."""
         arr, w, c = self.grid_for(net)
@@ -346,7 +346,7 @@ class Router:
                 if ng < best.get(ns, 1e18) - 1e-9:
                     best[ns] = ng
                     parent[ns] = s
-                    heapq.heappush(heap, (ng + HW * h(ns[1], ns[2]), cnt, ng, ns)); cnt += 1
+                    heapq.heappush(heap, (ng + weight * h(ns[1], ns[2]), cnt, ng, ns)); cnt += 1
         return None
 
     def _unwind(self, parent, s, plane_via):
@@ -430,6 +430,11 @@ def islands(r, net):
             continue
         g = Point(mm(t.GetPosition().x), mm(t.GetPosition().y)).buffer(mm(t.GetWidth(pcbnew.F_Cu)) / 2)
         items.append(dict(geo={0: g, 1: g, 2: g, 3: g}, pads=[], tht=True, plane=False))
+    for t in r.b.GetTracks():
+        if t.GetNetname() != net or t.GetClass() == "PCB_VIA" or t.GetLayerName() not in LAYERS:
+            continue
+        g = LineString([(mm(t.GetStart().x), mm(t.GetStart().y)), (mm(t.GetEnd().x), mm(t.GetEnd().y))]).buffer(mm(t.GetWidth()) / 2)
+        items.append(dict(geo={LAYERS.index(t.GetLayerName()): g}, pads=[], tht=False, plane=False, track=True))
     # union items that touch on a shared layer; THT pads join the inner plane of their net
     parent = list(range(len(items)))
 
@@ -465,8 +470,8 @@ def cells_of(r, island):
     cells = set()
     for it in island["items"]:
         for l, g in it["geo"].items():
-            if l not in (0, 1) or it.get("tht") and not it["pads"]:
-                continue                    # inner layers are reached by vias; never start on a via
+            if l not in (0, 1) or it.get("tht") and not it["pads"] or it.get("track"):
+                continue                    # inner layers are reached by vias; never start on a via or a track
             for i, j in r.cells_in(g, shrink=0.05):
                 cells.add((l, i, j))
     return cells
@@ -545,6 +550,7 @@ def kelvin(r):
         made, _ = r.commit(net, res[0], res[1])
         for t in made:
             r.dyn_uuids.discard(t.m_Uuid.AsString())
+            t.SetLocked(True)                      # a later repair pass never rips a Kelvin trace
         done.add(sense)
         strips += [t for t in made if t.GetClass() != "PCB_VIA"]
     return done, strips
@@ -631,6 +637,199 @@ def plan(r, net_re, skip_re, skip_pads=()):
     return jobs
 
 
+def attempt_job(r, job, masks, soft=False, big=False):
+    """Route one planned job; returns (cells, plane via) or None. big: one more, wider and greedier search."""
+    d, kind, net, a, b = job
+    starts = cells_of(r, a)
+    if not starts:
+        return None
+    if kind == "plane":
+        if net not in masks or masks[net] is None:
+            masks[net] = plane_mask(r, net)
+        res = None
+        if masks[net] is not None:
+            # IC pins: try a via under the package body first, out of the signal escape paths
+            body = under_body(r, a)
+            if body is not None:
+                res = r.route(net, starts, set(), plane_goal=masks[net] & body, soft=soft, max_exp=60000)
+            if res is None:
+                res = r.route(net, starts, set(), plane_goal=masks[net], soft=soft)
+        if res is None:
+            # fall back to the nearest pad of the net that already reaches the plane
+            ga = island_geom(a)
+            cand = [k2 for k2 in islands(r, net) if k2["plane"] and k2["pads"] and not set(k2["pads"]) & set(a["pads"])]
+            cand.sort(key=lambda k2: island_geom(k2).distance(ga))
+            for k2 in cand[:3]:
+                goals = cells_of(r, k2)
+                res = r.route(net, starts, goals, margin=8.0, soft=soft)
+                if res is None and big:
+                    res = r.route(net, starts, goals, margin=20.0, max_exp=2000000, soft=soft, weight=2.0)
+                if res is not None:
+                    break
+        return res
+    goals = cells_of(r, b)
+    if not goals and not any(l in (2, 3) for it in b["items"] for l in it["geo"]):
+        return None
+    inner = [g for it in b["items"] for l, g in it["geo"].items() if l in (2, 3) and not it["tht"]]
+    pg = None
+    if inner:
+        m = unary_union(inner).buffer(-0.45)
+        if not m.is_empty:
+            X, Y = np.meshgrid(r.xs, r.ys)
+            pg = shapely.contains_xy(m, X, Y)
+    res = r.route(net, starts, goals, plane_goal=pg, margin=6.0, soft=soft)
+    if res is None:
+        res = r.route(net, starts, goals, plane_goal=pg, margin=20.0, max_exp=1500000, soft=soft)
+    if res is None and big:
+        res = r.route(net, starts, goals, plane_goal=pg, margin=35.0, max_exp=3000000, soft=soft, weight=2.0)
+    return res
+
+
+def chain(r, t0):
+    """The router-made tracks and vias of t0's net joined to t0 through track ends and vias (not through pads)."""
+    net = t0.GetNetname()
+    pad_g = unary_union([g for p, ref, n, nid, g, ls in r.pads if n == net])
+    items = [t for t in r.b.GetTracks() if t.GetNetname() == net and t.m_Uuid.AsString() in r.dyn_uuids]
+    node = defaultdict(list)
+
+    def key(v):
+        return (round(mm(v.x), 3), round(mm(v.y), 3))
+    for t in items:
+        pts = [t.GetPosition()] if t.GetClass() == "PCB_VIA" else [t.GetStart(), t.GetEnd()]
+        for v in pts:
+            kk = key(v)
+            if not pad_g.is_empty and pad_g.contains(Point(kk)):
+                continue                      # a pad ends the chain
+            node[kk].append(t)
+    seen, todo = {t0.m_Uuid.AsString(): t0}, [t0]
+    while todo:
+        t = todo.pop()
+        pts = [t.GetPosition()] if t.GetClass() == "PCB_VIA" else [t.GetStart(), t.GetEnd()]
+        for v in pts:
+            for t2 in node.get(key(v), []):
+                u = t2.m_Uuid.AsString()
+                if u not in seen:
+                    seen[u] = t2
+                    todo.append(t2)
+    return list(seen.values())
+
+
+def still_open(r, job):
+    d, kind, net, a, b = job
+    p0 = a["pads"][0] if a["pads"] else None
+    if p0 is None:
+        return True
+    for isl in islands(r, net):
+        if p0 in isl["pads"]:
+            if kind == "plane":
+                return not isl["plane"]
+            return not (b["pads"] and b["pads"][0] in isl["pads"])
+    return True
+
+
+def repair(path, out, rounds=3):
+    """Route what is still open on a routed board. Every unlocked track is rippable: when a connection
+    cannot get through, the chains of other nets in its way are ripped and those nets routed again; the
+    change is kept only if all of them route."""
+    board = pcbnew.LoadBoard(path)
+    r = Router(board)
+    for t in board.GetTracks():
+        if not t.IsLocked():
+            r.dyn_uuids.add(t.m_Uuid.AsString())
+    r.build()
+    # Kelvin traces (sense pad to shunt pad) are never ripped, locked or not
+    nk = 0
+    for sense, shunt, other in KELVIN:
+        try:
+            sp, net, sg, sls = find_pad(r, sense)
+        except KeyError:
+            continue
+        for t in list(r.b.GetTracks()):
+            if t.GetNetname() != net or t.GetClass() == "PCB_VIA" or t.m_Uuid.AsString() not in r.dyn_uuids:
+                continue
+            if any(sg.distance(Point(mm(v.x), mm(v.y))) < 0.01 for v in (t.GetStart(), t.GetEnd())):
+                for t2 in chain(r, t):
+                    r.dyn_uuids.discard(t2.m_Uuid.AsString())
+                    t2.SetLocked(True)
+                    nk += 1
+    r.build()
+    print("kelvin items locked", nk, flush=True)
+    masks = {}
+    for rnd in range(rounds):
+        jobs = plan(r, ".*", "^$")
+        jobs.sort(key=lambda j: (j[1] != "plane", j[0]))
+        print(f"repair round {rnd + 1}: {len(jobs)} open", flush=True)
+        if not jobs:
+            break
+        fixed = 0
+        for job in jobs:
+            if not still_open(r, job):
+                continue
+            net = job[2]
+            res = attempt_job(r, job, masks, big=True)
+            if res is not None:
+                r.commit(net, res[0], res[1])
+                fixed += 1
+                continue
+            res = attempt_job(r, job, masks, soft=True, big=True)
+            if res is None:
+                continue
+            pts = [(r.x0 + s_[1] * G, r.y0 + s_[2] * G) for s_ in res[0]]
+            line = LineString(pts) if len(pts) > 1 else Point(pts[0])
+            rip, nets = {}, set()
+            for t in list(r.b.GetTracks()):
+                u = t.m_Uuid.AsString()
+                if u not in r.dyn_uuids or t.GetNetname() == net or u in rip:
+                    continue
+                g = Point(mm(t.GetPosition().x), mm(t.GetPosition().y)) if t.GetClass() == "PCB_VIA" else \
+                    LineString([(mm(t.GetStart().x), mm(t.GetStart().y)), (mm(t.GetEnd().x), mm(t.GetEnd().y))])
+                if g.distance(line) < 0.7:
+                    for t2 in chain(r, t):
+                        rip[t2.m_Uuid.AsString()] = t2
+                    nets.add(t.GetNetname())
+            for t in rip.values():
+                r.dyn_uuids.discard(t.m_Uuid.AsString())
+                r.b.Remove(t)
+            r.build(r.keepouts)
+            masks.clear()
+            new = []
+            res = attempt_job(r, job, masks, big=True)
+            ok = res is not None
+            if ok:
+                new += r.commit(net, res[0], res[1])[0]
+                for n in sorted(nets):
+                    for j2 in sorted(plan(r, "^" + re.escape(n) + "$", "^$"), key=lambda j: (j[1] != "plane", j[0])):
+                        rv = attempt_job(r, j2, masks, big=True)
+                        if rv is None:
+                            ok = False
+                            break
+                        new += r.commit(n, rv[0], rv[1])[0]
+                    if not ok:
+                        break
+            if ok:
+                fixed += 1
+                print(f"  fixed {net} (re-routed {len(nets)} nets)", flush=True)
+                continue
+            for t in new:
+                r.dyn_uuids.discard(t.m_Uuid.AsString())
+                r.b.Remove(t)
+            for t in rip.values():
+                r.b.Add(t)
+                r.dyn_uuids.add(t.m_Uuid.AsString())
+            r.build(r.keepouts)
+            masks.clear()
+        print(f"repair round {rnd + 1}: fixed {fixed}", flush=True)
+        if not fixed:
+            break
+    left = plan(r, ".*", "^$")
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    pcbnew.SaveBoard(out or path, board)
+    print("repair done; open", len(left))
+    for d, kind, net, a, b in left:
+        print("  OPEN", net, a["pads"], b["pads"] if b else "plane")
+    return left
+
+
 def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
     board = pcbnew.LoadBoard(path)
     r = Router(board)
@@ -647,46 +846,7 @@ def run(path, out, net_re=".*", skip_re="^$", keepouts=(), first=()):
     failed = []
 
     def attempt(k, soft=False):
-        d, kind, net, a, b = jobs[k]
-        starts = cells_of(r, a)
-        if not starts:
-            return None
-        if kind == "plane":
-            if net not in masks or masks[net] is None:
-                masks[net] = plane_mask(r, net)
-            res = None
-            if masks[net] is not None:
-                # IC pins: try a via under the package body first, out of the signal escape paths
-                body = under_body(r, a)
-                if body is not None:
-                    res = r.route(net, starts, set(), plane_goal=masks[net] & body, soft=soft, max_exp=60000)
-                if res is None:
-                    res = r.route(net, starts, set(), plane_goal=masks[net], soft=soft)
-            if res is None:
-                # fall back to the nearest pad of the net that already reaches the plane
-                ga = island_geom(a)
-                cand = [k2 for k2 in islands(r, net) if k2["plane"] and k2["pads"] and not set(k2["pads"]) & set(a["pads"])]
-                cand.sort(key=lambda k2: island_geom(k2).distance(ga))
-                for k2 in cand[:3]:
-                    goals = cells_of(r, k2)
-                    res = r.route(net, starts, goals, margin=8.0, soft=soft)
-                    if res is not None:
-                        break
-            return res
-        goals = cells_of(r, b)
-        if not goals and not any(l in (2, 3) for it in b["items"] for l in it["geo"]):
-            return None
-        inner = [g for it in b["items"] for l, g in it["geo"].items() if l in (2, 3) and not it["tht"]]
-        pg = None
-        if inner:
-            m = unary_union(inner).buffer(-0.45)
-            if not m.is_empty:
-                X, Y = np.meshgrid(r.xs, r.ys)
-                pg = shapely.contains_xy(m, X, Y)
-        res = r.route(net, starts, goals, plane_goal=pg, margin=6.0, soft=soft)
-        if res is None:
-            res = r.route(net, starts, goals, plane_goal=pg, margin=20.0, max_exp=1500000, soft=soft)
-        return res
+        return attempt_job(r, jobs[k], masks, soft)
 
     for k in range(len(jobs)):
         res = attempt(k)
@@ -795,5 +955,10 @@ if __name__ == "__main__":
     ap.add_argument("--skip", default="^$")
     ap.add_argument("--out")
     ap.add_argument("--first", default="", help="comma-separated nets to route before everything else")
+    ap.add_argument("--repair", action="store_true", help="route only what is still open on a routed board")
+    ap.add_argument("--rounds", type=int, default=3)
     a = ap.parse_args()
-    run(a.board, a.out, a.nets, a.skip, first=set(n for n in a.first.split(",") if n))
+    if a.repair:
+        repair(a.board, a.out, a.rounds)
+    else:
+        run(a.board, a.out, a.nets, a.skip, first=set(n for n in a.first.split(",") if n))

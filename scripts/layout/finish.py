@@ -232,6 +232,72 @@ def silk(board):
     return placed
 
 
+# notes on the back (the user's texts, which sat off the board): text -> (new text or None, height, local target x, y)
+BACK_NOTES = {
+    "e-psu": (None, 2.0, 108.0, 62.0),
+    "USB-controlled bench PSU front end  rev A": ("USB-controlled bench PSU front end  rev B", 1.0, 108.0, 65.0),
+    "4-layer: F sig / In1 GND / In2 PWR / B sig": (None, 1.0, 108.0, 67.0),
+    "JLCJLCJLCJLC": (None, 1.0, 108.0, 69.0),
+    "RANGING ISLAND (VFORCE)": (None, 1.0, 71.0, 28.5),
+    "ISOLATED USB": (None, 1.0, 69.5, 67.5),
+}
+
+
+def back_notes(board):
+    """Move the back-silkscreen notes onto the board, clear of plated pads, holes and each other."""
+    obst = []
+    for fp in board.GetFootprints():
+        for p in fp.Pads():
+            if p.GetAttribute() in (pcbnew.PAD_ATTRIB_PTH, pcbnew.PAD_ATTRIB_NPTH) or p.IsOnLayer(pcbnew.B_Cu):
+                l, t, r_, b = _bbox(p.GetBoundingBox())
+                obst.append(box(l - 0.25, t - 0.25, r_ + 0.25, b + 0.25))
+    for t in board.GetTracks():
+        if t.GetClass() == "PCB_VIA":
+            c = t.GetPosition()
+            obst.append(Point(pcbnew.ToMM(c.x), pcbnew.ToMM(c.y)).buffer(pcbnew.ToMM(t.GetDrillValue()) / 2 + 0.15))
+    tree = shapely.STRtree(obst)
+    x0, y0 = copper.OX + 0.6, copper.OY + 0.6
+    x1, y1 = copper.OX + copper.BW - 0.6, copper.OY + copper.BH - 0.6
+    placed = []
+    texts = {d.GetText(): d for d in board.GetDrawings() if d.GetClass() == "PCB_TEXT"}
+    for old, (new, hgt, tx, ty) in BACK_NOTES.items():
+        d = texts.get(old)
+        if d is None:
+            continue
+        if new:
+            d.SetText(new)
+        d.SetLayer(pcbnew.B_SilkS)
+        d.SetMirrored(True)
+        d.SetTextAngleDegrees(0)
+        d.SetTextSize(pcbnew.VECTOR2I(pcbnew.FromMM(hgt), pcbnew.FromMM(hgt)))
+        d.SetTextThickness(pcbnew.FromMM(max(0.15, hgt * 0.15)))
+        d.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+        d.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
+        a = d.GetEffectiveTextShape().BBox()
+        w, h = pcbnew.ToMM(a.GetWidth()) + 0.2, pcbnew.ToMM(a.GetHeight()) + 0.2
+        best = None
+        for ring in range(0, 60):
+            for k in range(max(1, 8 * ring)):
+                ang = 2 * math.pi * k / max(1, 8 * ring)
+                x = copper.OX + tx + 0.25 * ring * math.cos(ang)
+                y = copper.OY + ty + 0.25 * ring * math.sin(ang)
+                rr = box(x - w / 2, y - h / 2, x + w / 2, y + h / 2)
+                if rr.bounds[0] < x0 or rr.bounds[1] < y0 or rr.bounds[2] > x1 or rr.bounds[3] > y1:
+                    continue
+                if any(rr.intersects(obst[q]) for q in tree.query(rr)) or any(rr.distance(o) < 0.4 for o in placed):
+                    continue
+                best = (x, y, rr)
+                break
+            if best:
+                break
+        if best is None:
+            print("  no room on the back for", d.GetText())
+            continue
+        d.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(best[0]), pcbnew.FromMM(best[1])))
+        placed.append(best[2])
+    return len(placed)
+
+
 def run(path):
     board = pcbnew.LoadBoard(path)
     print("thermal vias joined solid:", copper.solid_thermal_vias(board))
@@ -239,6 +305,7 @@ def run(path):
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     print("stitching vias", stitch(board))
     print("references placed", silk(board))
+    print("back notes placed", back_notes(board))
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     pcbnew.SaveBoard(path, board)
 
